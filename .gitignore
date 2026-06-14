@@ -3,3 +3,6 @@
 !/index.html
 !/README.md
 !/.gitignore
+!/sw.js
+!/manifest.json
+!/icon.svg
