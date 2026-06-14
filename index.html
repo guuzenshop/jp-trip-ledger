@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="日本記帳" />
+<meta name="theme-color" content="#0f1115" />
+<title>日本旅遊記帳 🇯🇵</title>
+<style>
+  :root {
+    --bg:#0f1115; --panel:#1a1d24; --panel2:#232733; --line:#2e3340;
+    --text:#e8eaed; --muted:#9aa3b2;
+    --green:#34d399; --blue:#60a5fa; --pink:#f472b6; --amber:#f59e0b; --purple:#a78bfa; --red:#f87171; --teal:#2dd4bf;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font-family:"Noto Sans TC","Microsoft JhengHei",-apple-system,"Segoe UI",system-ui,sans-serif;
+    font-size:15px; line-height:1.5; padding-bottom:50px; }
+  .wrap { max-width:880px; margin:0 auto; padding:14px; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  h1 { font-size:19px; margin:0; }
+  .btn { background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:10px; padding:9px 14px; font-size:14px; cursor:pointer; transition:.15s; font-family:inherit; }
+  .btn:hover { background:#2c313d; } .btn:active { transform:scale(.97); }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .btn-primary { background:var(--green); color:#06281c; border-color:var(--green); font-weight:700; }
+  .btn-primary:hover { background:#2bbb8a; }
+  .btn-ghost { background:transparent; }
+  .btn-sm { padding:5px 10px; font-size:12px; border-radius:8px; }
+  .btn-danger { color:var(--red); border-color:#553; }
+
+  /* 匯率列 */
+  .ratebar { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 14px; margin-bottom:12px; }
+  .ratebar .info { flex:1; min-width:180px; }
+  .ratebar .big { font-size:15px; font-weight:700; }
+  .ratebar .src { font-size:11.5px; color:var(--muted); margin-top:1px; }
+
+  /* 摘要 */
+  .summary { background:linear-gradient(135deg,#1d2230,#161a22); border:1px solid var(--line);
+    border-radius:16px; padding:16px; margin-bottom:14px; }
+  .total-label { color:var(--muted); font-size:13px; }
+  .total-big { font-size:30px; font-weight:800; color:var(--green); }
+  .total-sub { color:var(--muted); font-size:12.5px; margin-top:4px; }
+  .accounts { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; margin-top:14px; }
+  .acct { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:11px 13px; border-left:4px solid var(--green); }
+  .acct .name { font-size:12.5px; color:var(--muted); display:flex; justify-content:space-between; align-items:center; }
+  .acct .bal { font-size:20px; font-weight:700; margin-top:3px; }
+  .acct.neg .bal { color:var(--red); }
+  .acct .detail { font-size:11.5px; color:var(--muted); margin-top:3px; }
+  .acct .twd { font-size:11px; color:var(--muted); margin-top:1px; }
+  .acct .tag { font-size:10px; background:var(--panel2); padding:1px 6px; border-radius:6px; }
+
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:14px; }
+  .card-title { font-size:14px; font-weight:700; margin:0 0 12px; display:flex; align-items:center; gap:8px; justify-content:space-between;}
+  .card-title .t { display:flex; align-items:center; gap:8px; }
+
+  /* 圖表 */
+  .chart-tabs { display:flex; gap:6px; margin-bottom:12px; }
+  .chart-tabs .btn-sm.active { background:var(--green); color:#06281c; border-color:var(--green); font-weight:700; }
+  .bars { display:flex; flex-direction:column; gap:9px; }
+  .bar-row { display:grid; grid-template-columns:84px 1fr auto; gap:10px; align-items:center; font-size:13px; }
+  .bar-row .lbl { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bar-track { background:var(--panel2); border-radius:6px; height:20px; overflow:hidden; }
+  .bar-fill { height:100%; border-radius:6px; transition:width .4s; min-width:2px; }
+  .bar-row .val { font-weight:600; white-space:nowrap; font-size:12.5px; }
+  .bar-row .val small { color:var(--muted); font-weight:400; }
+
+  /* 表單 */
+  .seg { display:inline-flex; background:var(--panel2); border-radius:10px; padding:3px; gap:3px; }
+  .seg label { padding:7px 16px; border-radius:8px; cursor:pointer; font-size:13.5px; color:var(--muted); user-select:none; }
+  .seg input { display:none; }
+  .seg label:has(input:checked) { background:var(--green); }
+  .seg label:has(input:checked) span { color:#06281c; font-weight:700; }
+  .grid-form { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+  .field { display:flex; flex-direction:column; gap:4px; }
+  .field.full { grid-column:1/-1; }
+  .field label { font-size:12px; color:var(--muted); }
+  input,select,textarea { background:var(--panel2); border:1px solid var(--line); color:var(--text);
+    border-radius:10px; padding:10px 12px; font-size:15px; font-family:inherit; width:100%; }
+  input:focus,select:focus,textarea:focus { outline:2px solid var(--green); outline-offset:-1px; }
+  .preview { font-size:12px; color:var(--blue); min-height:16px; }
+  .form-actions { display:flex; gap:10px; margin-top:14px; }
+  .form-actions .btn-primary { flex:1; padding:12px; }
+  .hint { font-size:12px; color:var(--muted); }
+
+  /* 列表 */
+  .filters { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; align-items:center; }
+  .filters .btn-sm.active { background:var(--green); color:#06281c; border-color:var(--green); font-weight:700; }
+  .day-group { margin-bottom:14px; }
+  .day-head { display:flex; justify-content:space-between; align-items:baseline; padding:0 4px 6px;
+    font-size:12.5px; color:var(--muted); border-bottom:1px solid var(--line); margin-bottom:8px; }
+  .day-head .sum { font-weight:700; color:var(--text); }
+  .txn-list { display:flex; flex-direction:column; gap:8px; }
+  .txn { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:11px 13px;
+    display:flex; align-items:center; gap:11px; }
+  .txn.flash { animation:flash 1.2s; }
+  @keyframes flash { 0%{background:#1f3a2e;} 100%{background:var(--panel);} }
+  .txn .mid { flex:1; min-width:0; }
+  .txn .desc { font-size:14.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .txn .meta { font-size:11.5px; color:var(--muted); margin-top:3px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .txn .amt { text-align:right; flex-shrink:0; }
+  .txn .amt .v { font-size:16px; font-weight:700; }
+  .txn .amt .v.exp { color:var(--red); } .txn .amt .v.top { color:var(--blue); }
+  .txn .amt .twd { font-size:11px; color:var(--muted); }
+  .txn .ops { display:flex; flex-direction:column; gap:4px; flex-shrink:0; }
+  .chip { font-size:10.5px; padding:1px 7px; border-radius:6px; font-weight:600; color:#06281c; }
+  .badge { font-size:10px; padding:1px 7px; border-radius:6px; font-weight:600; }
+  .badge.exp { background:#3a2224; color:#fca5a5; } .badge.top { background:#1e2e44; color:#93c5fd; }
+  .cat-badge { font-size:10px; padding:1px 7px; border-radius:6px; background:var(--panel2); color:var(--muted); }
+  .empty { text-align:center; color:var(--muted); padding:30px; font-size:14px; }
+
+  /* Modal */
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none;
+    align-items:flex-start; justify-content:center; padding:18px; z-index:50; overflow-y:auto; }
+  .modal-bg.show { display:flex; }
+  .modal { background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    padding:20px; width:100%; max-width:580px; margin:auto; }
+  .modal h2 { font-size:17px; margin:0 0 16px; }
+  .acct-edit { display:grid; grid-template-columns:1.4fr .8fr 1fr 1fr auto; gap:6px; align-items:center; margin-bottom:6px; }
+  .acct-edit input,.acct-edit select { padding:7px 8px; font-size:13px; }
+  .modal-section { border-top:1px solid var(--line); margin-top:18px; padding-top:16px; }
+  .modal-section h3 { font-size:14px; margin:0 0 10px; color:var(--muted); }
+  .row-end { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .file-label input { display:none; }
+
+  /* Toast */
+  #toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(20px);
+    background:var(--green); color:#06281c; font-weight:700; padding:10px 20px; border-radius:30px;
+    opacity:0; transition:.3s; z-index:99; pointer-events:none; font-size:14px; }
+  #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+  @media (max-width:560px) {
+    .grid-form { grid-template-columns:1fr; }
+    .total-big { font-size:26px; }
+    .acct-edit { grid-template-columns:1fr 1fr; gap:5px; padding-bottom:8px; border-bottom:1px dashed var(--line); margin-bottom:10px; }
+    .txn .ops { flex-direction:row; }
+    .bar-row { grid-template-columns:70px 1fr auto; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>🇯🇵 日本旅遊記帳</h1>
+    <button class="btn" onclick="openSettings()">⚙️ 設定</button>
+  </header>
+
+  <!-- 匯率列 -->
+  <div class="ratebar">
+    <div class="info">
+      <div class="big" id="rate-big">匯率載入中…</div>
+      <div class="src" id="rate-src"></div>
+    </div>
+    <button class="btn btn-sm" id="rate-btn" onclick="updateRate()">🔄 更新最新匯率</button>
+  </div>
+
+  <!-- 摘要 -->
+  <div class="summary">
+    <div class="total-label">總消費（台幣換算）</div>
+    <div class="total-big" id="total-twd">NT$0</div>
+    <div class="total-sub" id="total-breakdown"></div>
+    <div class="accounts" id="accounts"></div>
+  </div>
+
+  <!-- 圖表 -->
+  <div class="card">
+    <div class="card-title">
+      <span class="t">📊 消費分析</span>
+      <div class="chart-tabs">
+        <button class="btn btn-sm active" data-c="cat" onclick="setChart('cat')">分類</button>
+        <button class="btn btn-sm" data-c="pay" onclick="setChart('pay')">支付方式</button>
+      </div>
+    </div>
+    <div class="bars" id="chart"></div>
+  </div>
+
+  <!-- 新增表單 -->
+  <div class="card">
+    <div class="card-title"><span class="t">➕ <span id="form-mode-title">新增記錄</span></span></div>
+    <form id="entry-form" onsubmit="return submitForm(event)">
+      <div class="seg">
+        <label><input type="radio" name="ttype" value="expense" checked onchange="onTypeChange()"><span>💸 消費</span></label>
+        <label><input type="radio" name="ttype" value="topup" onchange="onTypeChange()"><span>🔄 儲值／轉帳</span></label>
+      </div>
+
+      <div class="grid-form">
+        <div class="field">
+          <label>日期</label>
+          <input type="date" id="f-date" />
+        </div>
+
+        <!-- 消費 -->
+        <div class="field expense-only">
+          <label>支付方式 / 帳戶</label>
+          <select id="f-account" onchange="updatePreview()"></select>
+        </div>
+        <div class="field expense-only">
+          <label>大項分類</label>
+          <select id="f-cat" onchange="updateSubcatList()"></select>
+        </div>
+        <div class="field expense-only">
+          <label>小項（可選或自填）</label>
+          <input type="text" id="f-subcat" list="subcat-list" placeholder="例：電鐵" />
+          <datalist id="subcat-list"></datalist>
+        </div>
+        <div class="field full expense-only">
+          <label>消費品項 / 名稱</label>
+          <input type="text" id="f-item" placeholder="例：南海電鐵 關西機場→難波" />
+        </div>
+
+        <!-- 儲值 -->
+        <div class="field topup-only" style="display:none">
+          <label>從（扣款帳戶）</label>
+          <select id="f-from" onchange="onTopupAcctChange()"></select>
+        </div>
+        <div class="field topup-only" style="display:none">
+          <label>到（入帳帳戶）</label>
+          <select id="f-to" onchange="onTopupAcctChange()"></select>
+        </div>
+
+        <div class="field">
+          <label id="amt-label">金額</label>
+          <input type="number" id="f-amount" inputmode="decimal" step="any" placeholder="0" oninput="updatePreview()" />
+          <div class="preview" id="amt-preview"></div>
+        </div>
+
+        <div class="field topup-only" id="toamt-field" style="display:none">
+          <label id="toamt-label">實際入帳金額</label>
+          <input type="number" id="f-toamount" inputmode="decimal" step="any" placeholder="0" />
+          <div class="preview hint">跨幣別轉換可手動修正實收金額</div>
+        </div>
+
+        <div class="field full">
+          <label>備註（可空白）</label>
+          <input type="text" id="f-note" placeholder="例：ICOCA 剩 ¥2330" />
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="f-submit">新增</button>
+        <button type="button" class="btn btn-ghost" id="f-cancel" style="display:none" onclick="cancelEdit()">取消編輯</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 列表 -->
+  <div class="filters">
+    <strong style="font-size:14px;margin-right:4px;">明細</strong>
+    <button class="btn btn-sm active" data-f="all" onclick="setFilter('all')">全部</button>
+    <button class="btn btn-sm" data-f="expense" onclick="setFilter('expense')">消費</button>
+    <button class="btn btn-sm" data-f="topup" onclick="setFilter('topup')">儲值</button>
+    <span style="flex:1"></span>
+    <span class="hint" id="count-line"></span>
+  </div>
+  <div id="txn-list"></div>
+
+</div>
+
+<!-- 設定 Modal -->
+<div class="modal-bg" id="settings-modal">
+  <div class="modal">
+    <h2>⚙️ 設定</h2>
+
+    <div class="field">
+      <label>匯率（1 元台幣 = ? 日圓）</label>
+      <input type="number" id="s-rate" inputmode="decimal" step="0.0001" />
+      <div class="hint">可按上方「🔄 更新最新匯率」自動帶入台灣銀行現金匯率，或在此手動修改。</div>
+    </div>
+
+    <div class="modal-section">
+      <h3>帳戶管理</h3>
+      <div id="acct-editor"></div>
+      <button class="btn btn-sm" onclick="addAccountRow()" style="margin-top:8px">＋ 新增帳戶</button>
+      <div class="hint" style="margin-top:6px">「初始」＝旅程開始時這個帳戶原有的錢。「類型」：儲值卡＝顯示餘額；信用卡＝顯示累計已刷。</div>
+    </div>
+
+    <div class="modal-section">
+      <h3>消費分類（大項：小項，用逗號分隔）</h3>
+      <textarea id="s-cats" rows="7" style="font-size:13px; line-height:1.7;"></textarea>
+      <div class="hint" style="margin-top:6px">每行一個大項，冒號後是該大項的小項。例：<code>交通: 電鐵, 地鐵, 新幹線</code></div>
+    </div>
+
+    <div class="modal-section">
+      <h3>資料備份（建議旅行前先匯出一份）</h3>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-sm" onclick="exportJSON()">⬇️ 匯出備份(JSON)</button>
+        <label class="btn btn-sm file-label">⬆️ 匯入備份<input type="file" accept=".json" onchange="importJSON(event)"></label>
+        <button class="btn btn-sm" onclick="exportCSV()">📊 匯出 CSV(Excel)</button>
+        <button class="btn btn-sm btn-danger" onclick="clearAll()">🗑️ 清除全部</button>
+      </div>
+      <div class="hint" style="margin-top:8px">⚠️ 資料存在這台裝置的瀏覽器中，清除瀏覽器資料會遺失，請定期匯出備份。</div>
+    </div>
+
+    <div class="row-end">
+      <button class="btn btn-primary" onclick="saveSettings()">儲存並關閉</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ===================== 資料層 ===================== */
+const STORE_KEY = 'jp_trip_ledger_v2';
+
+function defaultData() {
+  return {
+    rate: 4.98,
+    rateSource: '預設值（尚未更新）',
+    rateUpdatedAt: null,
+    accounts: [
+      { id:'twd',    name:'台幣現金', currency:'TWD', kind:'prepaid', initial:0, color:'#f59e0b' },
+      { id:'jpy',    name:'日幣現金', currency:'JPY', kind:'prepaid', initial:0, color:'#34d399' },
+      { id:'icoca',  name:'ICOCA',   currency:'JPY', kind:'prepaid', initial:0, color:'#60a5fa' },
+      { id:'paypay', name:'PayPay',  currency:'JPY', kind:'prepaid', initial:0, color:'#f472b6' },
+      { id:'card',   name:'信用卡',   currency:'JPY', kind:'credit',  initial:0, color:'#a78bfa' },
+    ],
+    categories: {
+      '交通': ['電鐵','地鐵','JR','新幹線','公車','計程車','機場交通'],
+      '飲食': ['早餐','午餐','晚餐','咖啡飲料','點心','超商'],
+      '購物': ['藥妝','紀念品','服飾','電器','超市'],
+      '住宿': ['飯店','民宿'],
+      '門票': ['景點','展覽','樂園'],
+      '其他': ['雜費','通訊','小費'],
+    },
+    txns: []
+  };
+}
+
+let data = load();
+let filter = 'all';
+let chartMode = 'cat';
+let editingId = null;
+let toamtTouched = false;
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY) || localStorage.getItem('jp_trip_ledger_v1');
+    if (!raw) return defaultData();
+    const d = JSON.parse(raw);
+    if (!d.accounts || !d.txns) return defaultData();
+    const def = defaultData();
+    if (!d.categories) d.categories = def.categories;
+    if (d.rateSource === undefined) d.rateSource = '手動設定';
+    if (d.rateUpdatedAt === undefined) d.rateUpdatedAt = null;
+    return d;
+  } catch (e) {
+    console.error('讀取失敗，使用預設值', e);
+    return defaultData();
+  }
+}
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
+  catch (e) { alert('儲存失敗：' + e.message); }
+}
+
+/* ===================== 計算 ===================== */
+function acctById(id) { return data.accounts.find(a => a.id === id); }
+function toTWD(amt, cur) { const r = Number(data.rate) || 1; return cur === 'TWD' ? amt : amt / r; }
+function toJPY(amt, cur) { const r = Number(data.rate) || 1; return cur === 'JPY' ? amt : amt * r; }
+
+// 回傳帳戶的 額度/已花費/已轉出/餘額
+function acctStats(id) {
+  const a = acctById(id);
+  let storedIn = Number(a.initial) || 0;  // 初始 + 轉入
+  let spent = 0, out = 0;
+  for (const t of data.txns) {
+    if (t.type === 'expense' && t.account === id) spent += Number(t.amount) || 0;
+    else if (t.type === 'topup') {
+      if (t.from === id) out += Number(t.amount) || 0;
+      if (t.to === id) storedIn += Number(t.toAmount != null ? t.toAmount : t.amount) || 0;
+    }
+  }
+  return { storedIn, spent, out, balance: storedIn - spent - out };
+}
+
+function computeTotals() {
+  let twd = 0, jpy = 0;
+  for (const t of data.txns) {
+    if (t.type !== 'expense') continue;
+    const a = acctById(t.account); if (!a) continue;
+    if (a.currency === 'TWD') twd += Number(t.amount) || 0;
+    else jpy += Number(t.amount) || 0;
+  }
+  return { twd, jpy, totalTWD: twd + toTWD(jpy, 'JPY') };
+}
+
+function categoryTotals() {
+  const m = {};
+  for (const t of data.txns) {
+    if (t.type !== 'expense') continue;
+    const a = acctById(t.account); if (!a) continue;
+    const key = t.cat || '未分類';
+    m[key] = (m[key] || 0) + toTWD(Number(t.amount) || 0, a.currency);
+  }
+  return Object.entries(m).sort((x, y) => y[1] - x[1]);
+}
+function paymentTotals() {
+  const m = {};
+  for (const t of data.txns) {
+    if (t.type !== 'expense') continue;
+    const a = acctById(t.account); if (!a) continue;
+    m[a.name] = (m[a.name] || 0) + toTWD(Number(t.amount) || 0, a.currency);
+  }
+  return Object.entries(m).sort((x, y) => y[1] - x[1]);
+}
+
+/* ===================== 格式化 ===================== */
+function fmt(amt, cur) {
+  const n = Math.round(Number(amt) || 0);
+  const s = Math.abs(n).toLocaleString('en-US');
+  return (n < 0 ? '-' : '') + (cur === 'TWD' ? 'NT$' : '¥') + s;
+}
+const PALETTE = ['#34d399','#60a5fa','#f472b6','#f59e0b','#a78bfa','#2dd4bf','#fb7185','#fbbf24'];
+
+/* ===================== 渲染 ===================== */
+function render() {
+  renderRate();
+  renderAccounts();
+  renderTotals();
+  renderChart();
+  renderTxns();
+}
+
+function renderRate() {
+  document.getElementById('rate-big').textContent = `1 元台幣 ≒ ¥${data.rate}　|　¥100 ≒ NT$${(100 / data.rate).toFixed(1)}`;
+  document.getElementById('rate-src').textContent = '來源：' + (data.rateSource || '手動') + (data.rateUpdatedAt ? '（' + data.rateUpdatedAt + '）' : '');
+}
+
+function renderAccounts() {
+  const el = document.getElementById('accounts');
+  el.innerHTML = '';
+  for (const a of data.accounts) {
+    const s = acctStats(a.id);
+    const isCredit = a.kind === 'credit';
+    const div = document.createElement('div');
+    div.className = 'acct' + (!isCredit && s.balance < 0 ? ' neg' : '');
+    div.style.borderLeftColor = a.color || 'var(--green)';
+    if (isCredit) {
+      div.innerHTML = `
+        <div class="name"><span>${escapeHtml(a.name)}</span><span class="tag">信用卡</span></div>
+        <div class="bal">${fmt(s.spent, a.currency)}</div>
+        <div class="detail">本次旅程累計已刷</div>
+        <div class="twd">≒ NT$${Math.round(toTWD(s.spent, a.currency)).toLocaleString('en-US')}</div>`;
+    } else {
+      const out = s.out > 0 ? `　|　已轉出 ${fmt(s.out, a.currency)}` : '';
+      div.innerHTML = `
+        <div class="name"><span>${escapeHtml(a.name)}</span><span class="tag">${a.currency}</span></div>
+        <div class="bal">${fmt(s.balance, a.currency)}</div>
+        <div class="detail">額度 ${fmt(s.storedIn, a.currency)}　|　已花 ${fmt(s.spent, a.currency)}${out}</div>
+        <div class="twd">餘額 ≒ NT$${Math.round(toTWD(s.balance, a.currency)).toLocaleString('en-US')}</div>`;
+    }
+    el.appendChild(div);
+  }
+}
+
+function renderTotals() {
+  const t = computeTotals();
+  document.getElementById('total-twd').textContent = fmt(t.totalTWD, 'TWD');
+  document.getElementById('total-breakdown').textContent =
+    `日幣消費 ${fmt(t.jpy, 'JPY')}（≒NT$${Math.round(toTWD(t.jpy, 'JPY')).toLocaleString('en-US')}）　＋　台幣消費 ${fmt(t.twd, 'TWD')}`;
+}
+
+function setChart(m) {
+  chartMode = m;
+  document.querySelectorAll('.chart-tabs [data-c]').forEach(b => b.classList.toggle('active', b.dataset.c === m));
+  renderChart();
+}
+function renderChart() {
+  const el = document.getElementById('chart');
+  const rows = chartMode === 'cat' ? categoryTotals() : paymentTotals();
+  if (rows.length === 0) { el.innerHTML = '<div class="empty" style="padding:14px">還沒有「消費」記錄。<br>新增一筆「💸 消費」後，這裡會自動長出分類／支付方式長條圖 📊</div>'; return; }
+  const total = rows.reduce((s, r) => s + r[1], 0) || 1;
+  const max = rows[0][1] || 1;
+  el.innerHTML = rows.map((r, i) => {
+    const pct = Math.round(r[1] / total * 100);
+    const w = Math.max(2, Math.round(r[1] / max * 100));
+    const color = PALETTE[i % PALETTE.length];
+    return `<div class="bar-row">
+      <div class="lbl">${escapeHtml(r[0])}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${w}%;background:${color}"></div></div>
+      <div class="val">NT$${Math.round(r[1]).toLocaleString('en-US')} <small>${pct}%</small></div>
+    </div>`;
+  }).join('');
+}
+
+function renderTxns() {
+  const host = document.getElementById('txn-list');
+  host.innerHTML = '';
+  let txns = [...data.txns];
+  if (filter !== 'all') txns = txns.filter(t => t.type === filter);
+  txns.sort((a, b) => (a.date !== b.date ? (a.date < b.date ? 1 : -1) : (a.id < b.id ? 1 : -1)));
+  document.getElementById('count-line').textContent = `${txns.length} 筆`;
+
+  if (txns.length === 0) {
+    host.innerHTML = '<div class="empty">還沒有記錄，從上方新增第一筆吧 ✏️</div>';
+    return;
+  }
+
+  // 依日期分組
+  const groups = {};
+  for (const t of txns) (groups[t.date] = groups[t.date] || []).push(t);
+  const dates = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
+
+  for (const date of dates) {
+    const items = groups[date];
+    let daySumTWD = 0;
+    for (const t of items) {
+      if (t.type === 'expense') { const a = acctById(t.account); if (a) daySumTWD += toTWD(Number(t.amount) || 0, a.currency); }
+    }
+    const group = document.createElement('div');
+    group.className = 'day-group';
+    group.innerHTML = `<div class="day-head"><span>${fullDate(date)}</span><span>當日消費 <span class="sum">NT$${Math.round(daySumTWD).toLocaleString('en-US')}</span></span></div>`;
+    const list = document.createElement('div');
+    list.className = 'txn-list';
+
+    for (const t of items) {
+      const div = document.createElement('div');
+      div.className = 'txn' + (t.id === window._flashId ? ' flash' : '');
+      if (t.type === 'expense') {
+        const a = acctById(t.account);
+        const cur = a ? a.currency : 'JPY';
+        const catTxt = [t.cat, t.subcat].filter(Boolean).join(' › ');
+        div.innerHTML = `
+          <div class="mid">
+            <div class="desc">${escapeHtml(t.item || '（未命名）')}</div>
+            <div class="meta">
+              ${catTxt ? `<span class="cat-badge">${escapeHtml(catTxt)}</span>` : ''}
+              <span class="chip" style="background:${a ? a.color : '#888'}">${a ? escapeHtml(a.name) : '?'}</span>
+              ${t.note ? '<span>· ' + escapeHtml(t.note) + '</span>' : ''}
+            </div>
+          </div>
+          <div class="amt">
+            <div class="v exp">−${fmt(t.amount, cur).replace('-', '')}</div>
+            <div class="twd">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div>
+          </div>
+          <div class="ops">
+            <button class="btn btn-sm" onclick="duplicate('${t.id}')">複製</button>
+            <button class="btn btn-sm" onclick="startEdit('${t.id}')">編輯</button>
+            <button class="btn btn-sm btn-danger" onclick="del('${t.id}')">刪除</button>
+          </div>`;
+      } else {
+        const from = acctById(t.from), to = acctById(t.to);
+        const fc = from ? from.currency : 'JPY', tc = to ? to.currency : 'JPY';
+        const toAmt = t.toAmount != null ? t.toAmount : t.amount;
+        div.innerHTML = `
+          <div class="mid">
+            <div class="desc">${from ? escapeHtml(from.name) : '?'} → ${to ? escapeHtml(to.name) : '?'}</div>
+            <div class="meta"><span class="badge top">儲值/轉帳</span>${t.note ? '<span>· ' + escapeHtml(t.note) + '</span>' : ''}</div>
+          </div>
+          <div class="amt">
+            <div class="v top">${fmt(t.amount, fc)}${fc !== tc ? ' → ' + fmt(toAmt, tc) : ''}</div>
+            <div class="twd">不計入消費</div>
+          </div>
+          <div class="ops">
+            <button class="btn btn-sm" onclick="duplicate('${t.id}')">複製</button>
+            <button class="btn btn-sm" onclick="startEdit('${t.id}')">編輯</button>
+            <button class="btn btn-sm btn-danger" onclick="del('${t.id}')">刪除</button>
+          </div>`;
+      }
+      list.appendChild(div);
+    }
+    group.appendChild(list);
+    host.appendChild(group);
+  }
+  window._flashId = null;
+}
+
+/* ===================== 下拉 / 分類 ===================== */
+function refreshSelects() {
+  const opts = data.accounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}（${a.currency}）</option>`).join('');
+  ['f-account', 'f-from', 'f-to'].forEach(id => {
+    const sel = document.getElementById(id);
+    const cur = sel.value;
+    sel.innerHTML = opts;
+    if (cur && data.accounts.some(a => a.id === cur)) sel.value = cur;
+  });
+  const from = document.getElementById('f-from'), to = document.getElementById('f-to');
+  if (from.value === to.value && data.accounts.length > 1) to.selectedIndex = 1;
+  refreshCategorySelect();
+}
+function refreshCategorySelect() {
+  const sel = document.getElementById('f-cat');
+  const cur = sel.value;
+  sel.innerHTML = Object.keys(data.categories).map(c => `<option>${escapeHtml(c)}</option>`).join('') + '<option value="">（不分類）</option>';
+  if (cur !== null && [...sel.options].some(o => o.value === cur)) sel.value = cur;
+  updateSubcatList();
+}
+function updateSubcatList() {
+  const cat = document.getElementById('f-cat').value;
+  const subs = data.categories[cat] || [];
+  document.getElementById('subcat-list').innerHTML = subs.map(s => `<option value="${escapeHtml(s)}">`).join('');
+}
+
+/* ===================== 表單 ===================== */
+function getType() { return document.querySelector('input[name="ttype"]:checked').value; }
+function onTypeChange() {
+  const type = getType();
+  document.querySelectorAll('.expense-only').forEach(e => e.style.display = type === 'expense' ? '' : 'none');
+  document.querySelectorAll('.topup-only').forEach(e => e.style.display = type === 'topup' ? '' : 'none');
+  document.getElementById('amt-label').textContent = type === 'topup' ? '轉出金額' : '金額';
+  if (type === 'topup') updateToAmtField();
+  updatePreview();
+}
+function onTopupAcctChange() { toamtTouched = false; updateToAmtField(); updatePreview(); }
+function updateToAmtField() {
+  const from = acctById(document.getElementById('f-from').value);
+  const to = acctById(document.getElementById('f-to').value);
+  const cross = from && to && from.currency !== to.currency;
+  document.getElementById('toamt-field').style.display = cross ? '' : 'none';
+  if (cross && to) document.getElementById('toamt-label').textContent = `實際入帳金額（${to.currency}）`;
+}
+function updatePreview() {
+  const type = getType();
+  const amt = Number(document.getElementById('f-amount').value) || 0;
+  const prev = document.getElementById('amt-preview');
+  if (type === 'expense') {
+    const a = acctById(document.getElementById('f-account').value);
+    if (!a || !amt) { prev.textContent = ''; return; }
+    prev.textContent = a.currency === 'TWD'
+      ? `≒ ¥${Math.round(toJPY(amt, 'TWD')).toLocaleString('en-US')}`
+      : `≒ NT$${Math.round(toTWD(amt, 'JPY')).toLocaleString('en-US')}`;
+  } else {
+    const from = acctById(document.getElementById('f-from').value);
+    const to = acctById(document.getElementById('f-to').value);
+    updateToAmtField();
+    if (from && to && from.currency !== to.currency) {
+      const suggest = to.currency === 'JPY' ? toJPY(amt, from.currency) : toTWD(amt, from.currency);
+      const toInput = document.getElementById('f-toamount');
+      if (!toamtTouched && amt) toInput.value = Math.round(suggest);
+      prev.textContent = amt ? `建議入帳 ≒ ${fmt(suggest, to.currency)}（可改）` : '';
+    } else {
+      prev.textContent = amt ? '同幣別，等額轉入' : '';
+    }
+  }
+}
+
+function submitForm(event) {
+  if (event) event.preventDefault();
+  const type = getType();
+  const date = document.getElementById('f-date').value || today();
+  const amount = Number(document.getElementById('f-amount').value);
+  const note = document.getElementById('f-note').value.trim();
+  if (!amount || amount <= 0) { alert('請輸入大於 0 的金額'); return false; }
+
+  let txn;
+  if (type === 'expense') {
+    const account = document.getElementById('f-account').value;
+    const item = document.getElementById('f-item').value.trim();
+    const cat = document.getElementById('f-cat').value;
+    const subcat = document.getElementById('f-subcat').value.trim();
+    if (!account) { alert('請選擇支付帳戶'); return false; }
+    if (!item) { alert('請輸入消費品項/名稱'); document.getElementById('f-item').focus(); return false; }
+    txn = { type: 'expense', date, account, cat, subcat, item, amount, note };
+  } else {
+    const from = document.getElementById('f-from').value;
+    const to = document.getElementById('f-to').value;
+    if (from === to) { alert('「從」和「到」不能是同一個帳戶'); return false; }
+    const fa = acctById(from), ta = acctById(to);
+    let toAmount = amount;
+    if (fa && ta && fa.currency !== ta.currency) {
+      toAmount = Number(document.getElementById('f-toamount').value) || 0;
+      if (toAmount <= 0) { alert('請輸入實際入帳金額'); return false; }
+    }
+    txn = { type: 'topup', date, from, to, amount, toAmount, note };
+  }
+
+  if (editingId) {
+    const idx = data.txns.findIndex(t => t.id === editingId);
+    txn.id = editingId; data.txns[idx] = txn;
+    window._flashId = editingId;
+    cancelEdit();
+    toast('已儲存修改 ✅');
+  } else {
+    txn.id = genId(); data.txns.push(txn);
+    window._flashId = txn.id;
+    toast('已新增 ✅');
+  }
+  save();
+  render();
+  resetFormKeepDate();
+  return false;
+}
+
+function resetFormKeepDate() {
+  document.getElementById('f-amount').value = '';
+  document.getElementById('f-item').value = '';
+  document.getElementById('f-subcat').value = '';
+  document.getElementById('f-note').value = '';
+  document.getElementById('f-toamount').value = '';
+  toamtTouched = false;
+  document.getElementById('amt-preview').textContent = '';
+  if (getType() === 'expense') document.getElementById('f-item').focus();
+}
+
+function fillForm(t) {
+  document.querySelector(`input[name="ttype"][value="${t.type}"]`).checked = true;
+  onTypeChange();
+  document.getElementById('f-date').value = t.date;
+  document.getElementById('f-amount').value = t.amount;
+  document.getElementById('f-note').value = t.note || '';
+  if (t.type === 'expense') {
+    document.getElementById('f-account').value = t.account;
+    document.getElementById('f-cat').value = t.cat || '';
+    updateSubcatList();
+    document.getElementById('f-subcat').value = t.subcat || '';
+    document.getElementById('f-item').value = t.item || '';
+  } else {
+    document.getElementById('f-from').value = t.from;
+    document.getElementById('f-to').value = t.to;
+    updateToAmtField();
+    if (t.toAmount != null) { document.getElementById('f-toamount').value = t.toAmount; toamtTouched = true; }
+  }
+  updatePreview();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function startEdit(id) {
+  const t = data.txns.find(x => x.id === id);
+  if (!t) return;
+  editingId = id;
+  fillForm(t);
+  document.getElementById('form-mode-title').textContent = '編輯記錄';
+  document.getElementById('f-submit').textContent = '儲存修改';
+  document.getElementById('f-cancel').style.display = '';
+}
+function duplicate(id) {
+  const t = data.txns.find(x => x.id === id);
+  if (!t) return;
+  editingId = null;            // 視為「新增」，不覆蓋原本那筆
+  fillForm(t);
+  document.getElementById('form-mode-title').textContent = '新增記錄（已複製，改完按新增）';
+  document.getElementById('f-submit').textContent = '新增';
+  document.getElementById('f-cancel').style.display = '';
+  toast('已複製，修改後按「新增」');
+}
+function cancelEdit() {
+  editingId = null;
+  document.getElementById('form-mode-title').textContent = '新增記錄';
+  document.getElementById('f-submit').textContent = '新增';
+  document.getElementById('f-cancel').style.display = 'none';
+  resetFormKeepDate();
+}
+function del(id) {
+  if (!confirm('確定刪除這筆記錄？')) return;
+  data.txns = data.txns.filter(t => t.id !== id);
+  if (editingId === id) cancelEdit();
+  save(); render();
+}
+function setFilter(f) {
+  filter = f;
+  document.querySelectorAll('.filters [data-f]').forEach(b => b.classList.toggle('active', b.dataset.f === f));
+  renderTxns();
+}
+
+/* ===================== 即時匯率（台灣銀行現金匯率）===================== */
+function fetchWithTimeout(url, ms) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(id));
+}
+async function updateRate() {
+  const btn = document.getElementById('rate-btn');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '更新中…';
+  try {
+    // 主來源：台灣銀行現金匯率（透過 CORS proxy）
+    const proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://rate.bot.com.tw/xrt/flcsv/0/day');
+    const res = await fetchWithTimeout(proxied, 12000);
+    const text = await res.text();
+    const line = text.split('\n').find(l => l.trim().toUpperCase().startsWith('JPY,'));
+    if (line) {
+      const parts = line.split(',');
+      const cashSell = parseFloat(parts[12]); // 現金賣出（台幣/日圓）
+      if (cashSell > 0) {
+        data.rate = +(1 / cashSell).toFixed(4);
+        data.rateSource = '台灣銀行現金賣出';
+        data.rateUpdatedAt = nowStr();
+        save(); render();
+        toast('匯率已更新 ✅');
+        alert(`已更新：台灣銀行現金賣出\n¥100 = NT$${(cashSell * 100).toFixed(2)}\n1 元台幣 ≒ ¥${data.rate}`);
+        return;
+      }
+    }
+    throw new Error('解析台銀資料失敗');
+  } catch (e1) {
+    // 備援：參考中價 API
+    try {
+      const res2 = await fetchWithTimeout('https://open.er-api.com/v6/latest/TWD', 10000);
+      const j = await res2.json();
+      if (j && j.rates && j.rates.JPY) {
+        data.rate = +Number(j.rates.JPY).toFixed(4);
+        data.rateSource = '參考中價（非現金匯率）';
+        data.rateUpdatedAt = nowStr();
+        save(); render();
+        alert(`台灣銀行來源暫時無法連線，已改用參考中價：\n1 元台幣 ≒ ¥${data.rate}\n（此為市場中價，與現金匯率略有差異，僅供參考）`);
+        return;
+      }
+      throw new Error('備援也失敗');
+    } catch (e2) {
+      alert('匯率更新失敗，可能是網路問題或來源暫時無法連線。\n你仍可到「⚙️ 設定」手動輸入匯率。\n\n台灣銀行牌告：https://rate.bot.com.tw/xrt');
+    }
+  } finally {
+    btn.disabled = false; btn.textContent = old;
+  }
+}
+
+/* ===================== 設定 ===================== */
+function openSettings() {
+  document.getElementById('s-rate').value = data.rate;
+  document.getElementById('s-cats').value = serializeCats(data.categories);
+  renderAcctEditor();
+  document.getElementById('settings-modal').classList.add('show');
+}
+function closeSettings() { document.getElementById('settings-modal').classList.remove('show'); }
+function renderAcctEditor() {
+  const el = document.getElementById('acct-editor');
+  el.innerHTML = '';
+  data.accounts.forEach((a, i) => {
+    const row = document.createElement('div');
+    row.className = 'acct-edit';
+    row.innerHTML = `
+      <input type="text" value="${escapeHtml(a.name)}" data-i="${i}" data-k="name" placeholder="名稱" />
+      <select data-i="${i}" data-k="currency">
+        <option value="JPY" ${a.currency === 'JPY' ? 'selected' : ''}>日圓</option>
+        <option value="TWD" ${a.currency === 'TWD' ? 'selected' : ''}>台幣</option>
+      </select>
+      <select data-i="${i}" data-k="kind">
+        <option value="prepaid" ${a.kind === 'prepaid' ? 'selected' : ''}>儲值卡</option>
+        <option value="credit" ${a.kind === 'credit' ? 'selected' : ''}>信用卡</option>
+      </select>
+      <input type="number" value="${a.initial}" data-i="${i}" data-k="initial" placeholder="初始" title="初始/原有金額" />
+      <button class="btn btn-sm btn-danger" onclick="removeAccount(${i})">✕</button>`;
+    el.appendChild(row);
+  });
+}
+function addAccountRow() {
+  data.accounts.push({ id: genId(), name: '新帳戶', currency: 'JPY', kind: 'prepaid', initial: 0, color: PALETTE[data.accounts.length % PALETTE.length] });
+  renderAcctEditor();
+}
+function removeAccount(i) {
+  const a = data.accounts[i];
+  if (data.txns.some(t => t.account === a.id || t.from === a.id || t.to === a.id)) {
+    alert('這個帳戶已有記錄使用，請先刪除相關記錄再移除帳戶。'); return;
+  }
+  if (!confirm(`移除帳戶「${a.name}」？`)) return;
+  data.accounts.splice(i, 1); renderAcctEditor();
+}
+function serializeCats(cats) { return Object.entries(cats).map(([k, v]) => `${k}: ${v.join(', ')}`).join('\n'); }
+function parseCats(text) {
+  const obj = {};
+  text.split('\n').forEach(line => {
+    line = line.trim(); if (!line) return;
+    const idx = line.indexOf(':') >= 0 ? line.indexOf(':') : line.indexOf('：');
+    let head, rest;
+    if (idx >= 0) { head = line.slice(0, idx); rest = line.slice(idx + 1); }
+    else { head = line; rest = ''; }
+    head = head.trim(); if (!head) return;
+    obj[head] = rest.split(/[,，、]/).map(s => s.trim()).filter(Boolean);
+  });
+  return obj;
+}
+function saveSettings() {
+  document.querySelectorAll('#acct-editor [data-i]').forEach(inp => {
+    const i = +inp.dataset.i, k = inp.dataset.k;
+    let v = inp.value;
+    if (k === 'initial') v = Number(v) || 0;
+    if (k === 'name') v = v.trim() || '未命名';
+    data.accounts[i][k] = v;
+  });
+  const r = Number(document.getElementById('s-rate').value);
+  if (r > 0 && r !== data.rate) { data.rate = r; data.rateSource = '手動設定'; data.rateUpdatedAt = nowStr(); }
+  const cats = parseCats(document.getElementById('s-cats').value);
+  if (Object.keys(cats).length) data.categories = cats;
+  save(); refreshSelects(); render(); closeSettings();
+  toast('設定已儲存 ✅');
+}
+
+/* ===================== 備份 ===================== */
+function exportJSON() { download(`日本記帳備份_${today()}.json`, JSON.stringify(data, null, 2), 'application/json'); }
+function importJSON(e) {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const d = JSON.parse(reader.result);
+      if (!d.accounts || !d.txns) throw new Error('檔案格式不正確');
+      if (!confirm('匯入會覆蓋目前所有資料，確定？')) return;
+      data = d;
+      if (!data.categories) data.categories = defaultData().categories;
+      save(); refreshSelects(); render(); closeSettings();
+      alert('匯入成功 ✅');
+    } catch (err) { alert('匯入失敗：' + err.message); }
+  };
+  reader.readAsText(file); e.target.value = '';
+}
+function exportCSV() {
+  const rows = [['日期', '類型', '大項', '小項', '品項/說明', '從帳戶', '到帳戶', '金額', '幣別', '台幣換算', '備註']];
+  for (const t of data.txns) {
+    if (t.type === 'expense') {
+      const a = acctById(t.account);
+      rows.push([t.date, '消費', t.cat || '', t.subcat || '', t.item || '', a ? a.name : '', '', t.amount, a ? a.currency : '', Math.round(toTWD(t.amount, a ? a.currency : 'JPY')), t.note || '']);
+    } else {
+      const from = acctById(t.from), to = acctById(t.to);
+      rows.push([t.date, '儲值', '', '', (from ? from.name : '') + '→' + (to ? to.name : ''), from ? from.name : '', to ? to.name : '', t.amount, from ? from.currency : '', '', t.note || '']);
+    }
+  }
+  const csv = '﻿' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  download(`日本記帳_${today()}.csv`, csv, 'text/csv');
+}
+function clearAll() {
+  if (!confirm('⚠️ 這會清除所有記錄與設定，回到初始狀態。建議先匯出備份。確定清除？')) return;
+  if (!confirm('再次確認：真的要清除全部嗎？')) return;
+  data = defaultData(); save(); refreshSelects(); render(); closeSettings();
+}
+
+/* ===================== 工具 ===================== */
+function today() { const d = new Date(); const tz = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return tz.toISOString().slice(0, 10); }
+function fullDate(s) {
+  if (!s) return '';
+  const d = new Date(s + 'T00:00:00');
+  const wd = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+  return `${s.slice(5).replace('-', '/')}（${wd}）`;
+}
+function nowStr() { const d = new Date(); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function download(name, content, mime) {
+  const blob = new Blob([content], { type: mime }); const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 1600);
+}
+
+/* 點背景關閉 modal */
+document.getElementById('settings-modal').addEventListener('click', e => { if (e.target.id === 'settings-modal') closeSettings(); });
+document.getElementById('f-toamount').addEventListener('input', () => { toamtTouched = true; });
+
+/* ===================== 啟動 ===================== */
+document.getElementById('f-date').value = today();
+refreshSelects();
+onTypeChange();
+render();
+</script>
+</body>
+</html>
