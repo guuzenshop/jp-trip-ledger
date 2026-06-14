@@ -125,7 +125,10 @@
   .txn .amt .v { font-size:16px; font-weight:700; }
   .txn .amt .v.exp { color:var(--red); } .txn .amt .v.top { color:var(--blue); }
   .txn .amt .twd { font-size:11px; color:var(--muted); }
-  .txn .ops { display:flex; flex-direction:row; gap:6px; flex-shrink:0; }
+  .txn .ops { display:flex; flex-direction:row; gap:6px; flex-shrink:0; position:relative; }
+  .ops-toggle { display:none; }
+  .ops-menu { display:flex; flex-direction:row; gap:6px; }
+  .ops-label { display:none; }
   .btn-icon { padding:0; width:34px; height:34px; display:inline-flex; align-items:center;
     justify-content:center; font-size:15px; border-radius:9px; line-height:1; }
   .txn .drag-handle { cursor:grab; color:var(--muted); font-size:16px; line-height:1;
@@ -166,6 +169,14 @@
     .acct-edit { grid-template-columns:1fr 1fr; gap:5px; padding-bottom:8px; border-bottom:1px dashed var(--line); margin-bottom:10px; }
     .btn-icon { width:32px; height:32px; font-size:14px; }
     .chart-wrap { gap:14px; justify-content:center; }
+    /* 手機版：單筆操作收合成「⋯」，點開才顯示 複製/編輯/刪除 */
+    .ops-toggle { display:inline-flex; }
+    .ops-menu { display:none; position:absolute; right:0; top:calc(100% + 4px); flex-direction:column;
+      gap:4px; background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:6px;
+      z-index:30; box-shadow:0 8px 24px rgba(0,0,0,.45); min-width:128px; }
+    .ops.open .ops-menu { display:flex; }
+    .ops-menu .btn-icon { width:100%; height:auto; justify-content:flex-start; padding:9px 12px; font-size:14px; gap:8px; }
+    .ops-label { display:inline; }
   }
 </style>
 </head>
@@ -615,11 +626,7 @@ function txnInnerHTML(t, showDate) {
         <div class="v exp">−${fmt(t.amount, cur).replace('-', '')}</div>
         <div class="twd">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div>
       </div>
-      <div class="ops">
-        <button class="btn btn-sm btn-icon" title="複製這筆" aria-label="複製" onclick="duplicate('${t.id}')">📋</button>
-        <button class="btn btn-sm btn-icon" title="編輯這筆" aria-label="編輯" onclick="startEdit('${t.id}')">✏️</button>
-        <button class="btn btn-sm btn-icon btn-danger" title="刪除這筆" aria-label="刪除" onclick="del('${t.id}')">🗑️</button>
-      </div>`;
+      ${opsHTML(t.id)}`;
   }
   const from = acctById(t.from), to = acctById(t.to);
   const fc = from ? from.currency : 'JPY', tc = to ? to.currency : 'JPY';
@@ -633,11 +640,7 @@ function txnInnerHTML(t, showDate) {
         <div class="v top">${fmt(t.amount, fc)}${fc !== tc ? ' → ' + fmt(toAmt, tc) : ''}</div>
         <div class="twd">不計入消費</div>
       </div>
-      <div class="ops">
-        <button class="btn btn-sm btn-icon" title="複製這筆" aria-label="複製" onclick="duplicate('${t.id}')">📋</button>
-        <button class="btn btn-sm btn-icon" title="編輯這筆" aria-label="編輯" onclick="startEdit('${t.id}')">✏️</button>
-        <button class="btn btn-sm btn-icon btn-danger" title="刪除這筆" aria-label="刪除" onclick="del('${t.id}')">🗑️</button>
-      </div>`;
+      ${opsHTML(t.id)}`;
 }
 function makeTxnDiv(t, showDate, withHandle) {
   const div = document.createElement('div');
@@ -652,6 +655,25 @@ function makeTxnDiv(t, showDate, withHandle) {
     : '';
   div.innerHTML = ctrl + txnInnerHTML(t, showDate);
   return div;
+}
+
+// 單筆操作：桌機三顆並排；手機收合成「⋯」，點開選 複製/編輯/刪除
+function opsHTML(id) {
+  return '<div class="ops">' +
+    '<button class="btn btn-sm btn-icon ops-toggle" title="操作" aria-label="更多操作" onclick="toggleOps(event,this)">⋯</button>' +
+    '<div class="ops-menu">' +
+    `<button class="btn btn-sm btn-icon" title="複製這筆" aria-label="複製" onclick="duplicate('${id}')">📋<span class="ops-label">複製</span></button>` +
+    `<button class="btn btn-sm btn-icon" title="編輯這筆" aria-label="編輯" onclick="startEdit('${id}')">✏️<span class="ops-label">編輯</span></button>` +
+    `<button class="btn btn-sm btn-icon btn-danger" title="刪除這筆" aria-label="刪除" onclick="del('${id}')">🗑️<span class="ops-label">刪除</span></button>` +
+    '</div></div>';
+}
+function closeAllOps() { document.querySelectorAll('.ops.open').forEach(o => o.classList.remove('open')); }
+function toggleOps(e, btn) {
+  e.stopPropagation();
+  const ops = btn.closest('.ops');
+  const willOpen = !ops.classList.contains('open');
+  closeAllOps();
+  if (willOpen) ops.classList.add('open');
 }
 
 // 手動排序：把目前顯示的新順序寫回 data.txns（未顯示的項目位置保留），並存檔
@@ -1194,6 +1216,8 @@ function toast(msg) {
 /* 點背景關閉 modal */
 document.getElementById('settings-modal').addEventListener('click', e => { if (e.target.id === 'settings-modal') closeSettings(); });
 document.getElementById('f-toamount').addEventListener('input', () => { toamtTouched = true; });
+/* 點選單以外處關閉「⋯」操作選單（toggleOps 已 stopPropagation，不會誤關自己）*/
+document.addEventListener('click', closeAllOps);
 
 /* 膠囊列：滑鼠拖曳左右捲動（手機用原生觸控捲動）*/
 function enableDragScroll(id) {
