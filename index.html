@@ -42,7 +42,7 @@
   .summary { background:linear-gradient(135deg,#1d2230,#161a22); border:1px solid var(--line);
     border-radius:16px; padding:16px; margin-bottom:14px; }
   .total-label { color:var(--muted); font-size:13px; }
-  .total-big { font-size:30px; font-weight:800; color:var(--green); }
+  .total-big { font-size:30px; font-weight:800; color:#ff5a36; }
   .total-sub { color:var(--muted); font-size:12.5px; margin-top:4px; }
   .accounts { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; margin-top:14px; }
   .acct { background:var(--panel); border:1px solid var(--line); border-radius:12px;
@@ -62,12 +62,16 @@
   .chart-tabs { display:flex; gap:6px; margin-bottom:12px; }
   .chart-tabs .btn-sm.active { background:var(--green); color:#06281c; border-color:var(--green); font-weight:700; }
   .bars { display:flex; flex-direction:column; gap:9px; }
-  .bar-row { display:grid; grid-template-columns:84px 1fr auto; gap:10px; align-items:center; font-size:13px; }
-  .bar-row .lbl { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .bar-track { background:var(--panel2); border-radius:6px; height:20px; overflow:hidden; }
-  .bar-fill { height:100%; border-radius:6px; transition:width .4s; min-width:2px; }
-  .bar-row .val { font-weight:600; white-space:nowrap; font-size:12.5px; }
-  .bar-row .val small { color:var(--muted); font-weight:400; }
+
+  /* 圓餅圖 */
+  .chart-wrap { display:flex; gap:20px; align-items:center; flex-wrap:wrap; }
+  .pie { flex-shrink:0; }
+  .pie-legend { flex:1; min-width:190px; display:flex; flex-direction:column; gap:8px; }
+  .leg-row { display:flex; align-items:center; gap:9px; font-size:13.5px; }
+  .leg-dot { width:13px; height:13px; border-radius:4px; flex-shrink:0; }
+  .leg-name { color:var(--muted); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .leg-val { font-weight:600; white-space:nowrap; }
+  .leg-val small { color:var(--muted); font-weight:400; }
 
   /* 表單 */
   .seg { display:inline-flex; background:var(--panel2); border-radius:10px; padding:3px; gap:3px; }
@@ -90,6 +94,18 @@
   /* 列表 */
   .filters { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; align-items:center; }
   .filters .btn-sm.active { background:var(--green); color:#06281c; border-color:var(--green); font-weight:700; }
+
+  /* 日期篩選列（可左右拖曳/滑動）*/
+  .date-strip { display:flex; gap:7px; overflow-x:auto; padding:2px 2px 9px; margin-bottom:10px;
+    scrollbar-width:thin; -webkit-overflow-scrolling:touch; cursor:grab; }
+  .date-strip.dragging { cursor:grabbing; }
+  .date-strip:empty { display:none; }
+  .date-strip::-webkit-scrollbar { height:6px; }
+  .date-strip::-webkit-scrollbar-thumb { background:var(--line); border-radius:3px; }
+  .date-chip { flex-shrink:0; white-space:nowrap; background:var(--panel2); border:1px solid var(--line);
+    border-radius:10px; padding:7px 12px; font-size:12.5px; color:var(--muted); cursor:pointer; user-select:none; }
+  .date-chip.active { background:var(--green); color:#06281c; border-color:var(--green); font-weight:700; }
+  .date-chip .c { font-size:10.5px; opacity:.75; margin-left:5px; }
   .day-group { margin-bottom:14px; }
   .day-head { display:flex; justify-content:space-between; align-items:baseline; padding:0 4px 6px;
     font-size:12.5px; color:var(--muted); border-bottom:1px solid var(--line); margin-bottom:8px; }
@@ -106,7 +122,15 @@
   .txn .amt .v { font-size:16px; font-weight:700; }
   .txn .amt .v.exp { color:var(--red); } .txn .amt .v.top { color:var(--blue); }
   .txn .amt .twd { font-size:11px; color:var(--muted); }
-  .txn .ops { display:flex; flex-direction:column; gap:4px; flex-shrink:0; }
+  .txn .ops { display:flex; flex-direction:row; gap:6px; flex-shrink:0; }
+  .btn-icon { padding:0; width:34px; height:34px; display:inline-flex; align-items:center;
+    justify-content:center; font-size:15px; border-radius:9px; line-height:1; }
+  .txn .drag-handle { cursor:grab; color:var(--muted); font-size:16px; line-height:1;
+    padding:1px 2px; touch-action:none; user-select:none; display:flex; align-items:center; justify-content:center; }
+  .txn.dragging { opacity:.65; background:var(--panel2); }
+  .txn .move-ctrl { flex-shrink:0; display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .move-btn { width:28px; height:24px; padding:0; font-size:11px; border-radius:6px;
+    display:inline-flex; align-items:center; justify-content:center; line-height:1; }
   .chip { font-size:10.5px; padding:1px 7px; border-radius:6px; font-weight:600; color:#06281c; }
   .badge { font-size:10px; padding:1px 7px; border-radius:6px; font-weight:600; }
   .badge.exp { background:#3a2224; color:#fca5a5; } .badge.top { background:#1e2e44; color:#93c5fd; }
@@ -137,8 +161,8 @@
     .grid-form { grid-template-columns:1fr; }
     .total-big { font-size:26px; }
     .acct-edit { grid-template-columns:1fr 1fr; gap:5px; padding-bottom:8px; border-bottom:1px dashed var(--line); margin-bottom:10px; }
-    .txn .ops { flex-direction:row; }
-    .bar-row { grid-template-columns:70px 1fr auto; }
+    .btn-icon { width:32px; height:32px; font-size:14px; }
+    .chart-wrap { gap:14px; justify-content:center; }
   }
 </style>
 </head>
@@ -174,6 +198,7 @@
       <div class="chart-tabs">
         <button class="btn btn-sm active" data-c="cat" onclick="setChart('cat')">分類</button>
         <button class="btn btn-sm" data-c="pay" onclick="setChart('pay')">支付方式</button>
+        <button class="btn btn-sm" onclick="openChartTab()" title="在新分頁開啟完整分析">🔗 新分頁</button>
       </div>
     </div>
     <div class="bars" id="chart"></div>
@@ -257,6 +282,14 @@
     <span style="flex:1"></span>
     <span class="hint" id="count-line"></span>
   </div>
+  <div class="date-strip" id="sort-strip">
+    <button class="date-chip active" data-s="date_desc" onclick="setSort('date_desc')">📅 最新優先</button>
+    <button class="date-chip" data-s="date_asc" onclick="setSort('date_asc')">📅 最舊優先</button>
+    <button class="date-chip" data-s="amt_desc" onclick="setSort('amt_desc')">💰 金額高→低</button>
+    <button class="date-chip" data-s="amt_asc" onclick="setSort('amt_asc')">💰 金額低→高</button>
+    <button class="date-chip" data-s="manual" onclick="setSort('manual')">✋ 自訂順序</button>
+  </div>
+  <div class="date-strip" id="date-strip"></div>
   <div id="txn-list"></div>
 
 </div>
@@ -334,6 +367,8 @@ function defaultData() {
 
 let data = load();
 let filter = 'all';
+let dateFilter = 'all';
+let sortMode = 'date_desc';
 let chartMode = 'cat';
 let editingId = null;
 let toamtTouched = false;
@@ -424,6 +459,7 @@ function render() {
   renderAccounts();
   renderTotals();
   renderChart();
+  renderDateStrip();
   renderTxns();
 }
 
@@ -474,19 +510,204 @@ function setChart(m) {
 function renderChart() {
   const el = document.getElementById('chart');
   const rows = chartMode === 'cat' ? categoryTotals() : paymentTotals();
-  if (rows.length === 0) { el.innerHTML = '<div class="empty" style="padding:14px">還沒有「消費」記錄。<br>新增一筆「💸 消費」後，這裡會自動長出分類／支付方式長條圖 📊</div>'; return; }
+  if (rows.length === 0) { el.innerHTML = '<div class="empty" style="padding:14px">還沒有「消費」記錄。<br>新增一筆「💸 消費」後，這裡會自動長出分類／支付方式圓餅圖 📊</div>'; return; }
+  el.innerHTML = `<div class="chart-wrap">${pieSVG(rows, 180)}<div class="pie-legend">${legendHTML(rows)}</div></div>`;
+}
+
+/* 圓餅圖（純 SVG，零外掛） */
+function polarPt(cx, cy, r, angleDeg) {
+  const a = (angleDeg - 90) * Math.PI / 180;
+  return { x: +(cx + r * Math.cos(a)).toFixed(2), y: +(cy + r * Math.sin(a)).toFixed(2) };
+}
+function arcPath(cx, cy, r, start, end) {
+  const s = polarPt(cx, cy, r, start), e = polarPt(cx, cy, r, end);
+  const large = (end - start) > 180 ? 1 : 0;
+  return `M${cx},${cy} L${s.x},${s.y} A${r},${r} 0 ${large} 1 ${e.x},${e.y} Z`;
+}
+function pieSVG(rows, size) {
   const total = rows.reduce((s, r) => s + r[1], 0) || 1;
-  const max = rows[0][1] || 1;
-  el.innerHTML = rows.map((r, i) => {
-    const pct = Math.round(r[1] / total * 100);
-    const w = Math.max(2, Math.round(r[1] / max * 100));
+  const cx = size / 2, cy = size / 2, r = size / 2 - 4;
+  let acc = 0, segs = '';
+  rows.forEach((row, i) => {
+    const frac = row[1] / total, start = acc * 360; acc += frac; const end = acc * 360;
     const color = PALETTE[i % PALETTE.length];
-    return `<div class="bar-row">
-      <div class="lbl">${escapeHtml(r[0])}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${w}%;background:${color}"></div></div>
-      <div class="val">NT$${Math.round(r[1]).toLocaleString('en-US')} <small>${pct}%</small></div>
-    </div>`;
+    segs += frac >= 0.9999
+      ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"/>`
+      : `<path d="${arcPath(cx, cy, r, start, end)}" fill="${color}" stroke="#1a1d24" stroke-width="1.5"/>`;
+  });
+  return `<svg class="pie" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${segs}</svg>`;
+}
+function legendHTML(rows) {
+  const total = rows.reduce((s, r) => s + r[1], 0) || 1;
+  return rows.map((row, i) => {
+    const pct = Math.round(row[1] / total * 100), color = PALETTE[i % PALETTE.length];
+    return `<div class="leg-row"><span class="leg-dot" style="background:${color}"></span>` +
+      `<span class="leg-name">${escapeHtml(row[0])}</span>` +
+      `<span class="leg-val">NT$${Math.round(row[1]).toLocaleString('en-US')} <small>${pct}%</small></span></div>`;
   }).join('');
+}
+
+/* 在新分頁開啟完整分析（分類＋支付方式，純前端快照） */
+function openChartTab() {
+  const cat = categoryTotals(), pay = paymentTotals();
+  if (cat.length === 0 && pay.length === 0) { toast('還沒有消費記錄可分析'); return; }
+  const w = window.open('', '_blank');
+  if (!w) { alert('瀏覽器阻擋了新分頁，請允許此網站的彈出視窗後再試一次。'); return; }
+  const section = (title, rows) => rows.length
+    ? `<div class="sec"><h2>${title}</h2><div class="cw">${pieSVG(rows, 260)}<div class="lg">${legendHTML(rows)}</div></div></div>`
+    : '';
+  const t = computeTotals();
+  const html = `<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>消費分析 — 日本旅遊記帳</title>
+<style>
+  body{margin:0;background:#0f1115;color:#e8eaed;padding:20px;
+    font-family:"Noto Sans TC","Microsoft JhengHei",-apple-system,"Segoe UI",system-ui,sans-serif;}
+  .wrap{max-width:760px;margin:0 auto;}
+  h1{font-size:20px;margin:0 0 4px;} .total{font-size:14px;color:#9aa3b2;margin-bottom:18px;}
+  .total b{color:#ff5a36;font-size:22px;margin-left:6px;}
+  .sec{background:#1a1d24;border:1px solid #2e3340;border-radius:16px;padding:18px;margin-bottom:16px;}
+  h2{font-size:15px;margin:0 0 14px;}
+  .cw{display:flex;gap:22px;align-items:center;flex-wrap:wrap;justify-content:center;}
+  .lg{flex:1;min-width:220px;display:flex;flex-direction:column;gap:9px;}
+  .leg-row{display:flex;align-items:center;gap:9px;font-size:14px;}
+  .leg-dot{width:14px;height:14px;border-radius:4px;flex-shrink:0;}
+  .leg-name{color:#9aa3b2;flex:1;}
+  .leg-val{font-weight:600;} .leg-val small{color:#9aa3b2;font-weight:400;}
+  .tip{color:#9aa3b2;font-size:12px;text-align:center;margin-top:8px;}
+</style></head><body><div class="wrap">
+<h1>📊 消費分析</h1>
+<div class="total">總消費（台幣換算）<b>${fmt(t.totalTWD, 'TWD')}</b></div>
+${section('依分類佔比', cat)}
+${section('依支付方式佔比', pay)}
+<div class="tip">此頁為目前資料的快照（${nowStr()}）。關閉後可隨時從 App 的「🔗 新分頁」再次開啟。</div>
+</div></body></html>`;
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+// 單筆台幣換算值（跨幣別比大小用）
+function txnTWDValue(t) {
+  if (t.type === 'expense') { const a = acctById(t.account); return toTWD(Number(t.amount) || 0, a ? a.currency : 'JPY'); }
+  const f = acctById(t.from); return toTWD(Number(t.amount) || 0, f ? f.currency : 'JPY');
+}
+
+// 單筆卡片內容（showDate=true 時在 meta 補上日期，給「金額排序」的平鋪清單用）
+function txnInnerHTML(t, showDate) {
+  const dateTag = showDate ? `<span class="cat-badge">${fullDate(t.date)}</span>` : '';
+  if (t.type === 'expense') {
+    const a = acctById(t.account);
+    const cur = a ? a.currency : 'JPY';
+    const catTxt = [t.cat, t.subcat].filter(Boolean).join(' › ');
+    return `
+      <div class="mid">
+        <div class="desc">${escapeHtml(t.item || '（未命名）')}</div>
+        <div class="meta">
+          ${dateTag}
+          ${catTxt ? `<span class="cat-badge">${escapeHtml(catTxt)}</span>` : ''}
+          <span class="chip" style="background:${escapeHtml(a ? a.color : '#888')}">${a ? escapeHtml(a.name) : '?'}</span>
+          ${t.note ? '<span>· ' + escapeHtml(t.note) + '</span>' : ''}
+        </div>
+      </div>
+      <div class="amt">
+        <div class="v exp">−${fmt(t.amount, cur).replace('-', '')}</div>
+        <div class="twd">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div>
+      </div>
+      <div class="ops">
+        <button class="btn btn-sm btn-icon" title="複製這筆" aria-label="複製" onclick="duplicate('${t.id}')">📋</button>
+        <button class="btn btn-sm btn-icon" title="編輯這筆" aria-label="編輯" onclick="startEdit('${t.id}')">✏️</button>
+        <button class="btn btn-sm btn-icon btn-danger" title="刪除這筆" aria-label="刪除" onclick="del('${t.id}')">🗑️</button>
+      </div>`;
+  }
+  const from = acctById(t.from), to = acctById(t.to);
+  const fc = from ? from.currency : 'JPY', tc = to ? to.currency : 'JPY';
+  const toAmt = t.toAmount != null ? t.toAmount : t.amount;
+  return `
+      <div class="mid">
+        <div class="desc">${from ? escapeHtml(from.name) : '?'} → ${to ? escapeHtml(to.name) : '?'}</div>
+        <div class="meta">${dateTag}<span class="badge top">儲值/轉帳</span>${t.note ? '<span>· ' + escapeHtml(t.note) + '</span>' : ''}</div>
+      </div>
+      <div class="amt">
+        <div class="v top">${fmt(t.amount, fc)}${fc !== tc ? ' → ' + fmt(toAmt, tc) : ''}</div>
+        <div class="twd">不計入消費</div>
+      </div>
+      <div class="ops">
+        <button class="btn btn-sm btn-icon" title="複製這筆" aria-label="複製" onclick="duplicate('${t.id}')">📋</button>
+        <button class="btn btn-sm btn-icon" title="編輯這筆" aria-label="編輯" onclick="startEdit('${t.id}')">✏️</button>
+        <button class="btn btn-sm btn-icon btn-danger" title="刪除這筆" aria-label="刪除" onclick="del('${t.id}')">🗑️</button>
+      </div>`;
+}
+function makeTxnDiv(t, showDate, withHandle) {
+  const div = document.createElement('div');
+  div.className = 'txn' + (t.id === window._flashId ? ' flash' : '');
+  div.dataset.id = t.id;
+  const ctrl = withHandle
+    ? '<div class="move-ctrl">' +
+      `<button class="btn btn-sm move-btn" title="上移一格" aria-label="上移" onclick="moveTxn('${t.id}',-1)">▲</button>` +
+      '<div class="drag-handle" title="按住拖曳排序" aria-label="拖曳排序">⠿</div>' +
+      `<button class="btn btn-sm move-btn" title="下移一格" aria-label="下移" onclick="moveTxn('${t.id}',1)">▼</button>` +
+      '</div>'
+    : '';
+  div.innerHTML = ctrl + txnInnerHTML(t, showDate);
+  return div;
+}
+
+// 手動排序：把目前顯示的新順序寫回 data.txns（未顯示的項目位置保留），並存檔
+function commitManualOrder(orderedIds) {
+  const displayed = new Set(orderedIds);
+  const q = orderedIds.slice();
+  const byId = {};
+  for (const t of data.txns) byId[t.id] = t;
+  data.txns = data.txns.map(t => displayed.has(t.id) ? byId[q.shift()] : t);
+  save();
+}
+// 上移／下移一格（dir=-1 上、1 下）；以目前篩選後的顯示順序為基準
+function moveTxn(id, dir) {
+  const shown = data.txns.filter(t => (filter === 'all' || t.type === filter) && (dateFilter === 'all' || t.date === dateFilter));
+  const ids = shown.map(t => t.id);
+  const i = ids.indexOf(id), j = i + dir;
+  if (i < 0 || j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  commitManualOrder(ids);
+  renderTxns();
+}
+// 讓清單可用手指／滑鼠拖曳排序（pointer events，桌機與手機通用）
+function enableRowReorder(listEl) {
+  let dragEl = null, moved = false;
+  listEl.querySelectorAll('.drag-handle').forEach(handle => {
+    handle.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      dragEl = handle.closest('.txn');
+      moved = false;
+      if (dragEl) { dragEl.classList.add('dragging'); try { handle.setPointerCapture(e.pointerId); } catch (_) {} }
+    });
+  });
+  listEl.addEventListener('pointermove', e => {
+    if (!dragEl) return;
+    e.preventDefault();
+    const y = e.clientY;
+    for (const r of listEl.querySelectorAll('.txn')) {
+      if (r === dragEl) continue;
+      const rect = r.getBoundingClientRect();
+      if (y >= rect.top && y <= rect.bottom) {
+        const mid = rect.top + rect.height / 2;
+        if (y < mid) { if (dragEl.nextSibling !== r) { listEl.insertBefore(dragEl, r); moved = true; } }
+        else { if (r.nextSibling !== dragEl) { listEl.insertBefore(dragEl, r.nextSibling); moved = true; } }
+        break;
+      }
+    }
+  });
+  const end = () => {
+    if (!dragEl) return;
+    dragEl.classList.remove('dragging');
+    dragEl = null;
+    if (moved) {
+      const ids = [...listEl.querySelectorAll('.txn[data-id]')].map(r => r.dataset.id);
+      commitManualOrder(ids);
+      renderTxns();
+    }
+  };
+  listEl.addEventListener('pointerup', end);
+  listEl.addEventListener('pointercancel', end);
 }
 
 function renderTxns() {
@@ -494,21 +715,55 @@ function renderTxns() {
   host.innerHTML = '';
   let txns = [...data.txns];
   if (filter !== 'all') txns = txns.filter(t => t.type === filter);
-  txns.sort((a, b) => (a.date !== b.date ? (a.date < b.date ? 1 : -1) : (a.id < b.id ? 1 : -1)));
-  document.getElementById('count-line').textContent = `${txns.length} 筆`;
+  if (dateFilter !== 'all') txns = txns.filter(t => t.date === dateFilter);
+  document.getElementById('count-line').textContent =
+    `${txns.length} 筆${dateFilter !== 'all' ? '（' + fullDate(dateFilter) + '）' : ''}`;
 
   if (txns.length === 0) {
     host.innerHTML = '<div class="empty">還沒有記錄，從上方新增第一筆吧 ✏️</div>';
     return;
   }
 
-  // 依日期分組
+  // 自訂順序（手動拖曳）→ 依 data.txns 陣列順序，平鋪、每筆可拖曳
+  if (sortMode === 'manual') {
+    const tip = document.createElement('div');
+    tip.className = 'hint';
+    tip.style.cssText = 'margin:-2px 4px 8px';
+    tip.textContent = '✋ 自訂模式：按住每筆左側 ⠿ 拖曳，或點 ▲ ▼ 上下移動，皆可排序；順序會自動記住。';
+    host.appendChild(tip);
+    const list = document.createElement('div');
+    list.className = 'txn-list';
+    for (const t of txns) list.appendChild(makeTxnDiv(t, true, true));
+    host.appendChild(list);
+    enableRowReorder(list);
+    window._flashId = null;
+    return;
+  }
+
+  // 金額排序 → 平鋪清單（跨日比較，每筆顯示日期）
+  if (sortMode === 'amt_desc' || sortMode === 'amt_asc') {
+    txns.sort((a, b) => {
+      const d = txnTWDValue(b) - txnTWDValue(a);
+      if (d !== 0) return sortMode === 'amt_desc' ? d : -d;
+      return a.id < b.id ? 1 : -1;
+    });
+    const list = document.createElement('div');
+    list.className = 'txn-list';
+    for (const t of txns) list.appendChild(makeTxnDiv(t, true));
+    host.appendChild(list);
+    window._flashId = null;
+    return;
+  }
+
+  // 日期排序 → 依日期分組（asc=最舊優先 / desc=最新優先）
+  const asc = sortMode === 'date_asc';
   const groups = {};
   for (const t of txns) (groups[t.date] = groups[t.date] || []).push(t);
-  const dates = Object.keys(groups).sort((a, b) => (a < b ? 1 : -1));
+  const dates = Object.keys(groups).sort((a, b) => (asc ? (a < b ? -1 : 1) : (a < b ? 1 : -1)));
 
   for (const date of dates) {
-    const items = groups[date];
+    // 同一天之內也依新增先後：最舊優先=最早新增在上；最新優先=最新新增在上（id 含建立時間戳）
+    const items = groups[date].slice().sort((a, b) => asc ? (a.id < b.id ? -1 : 1) : (a.id < b.id ? 1 : -1));
     let daySumTWD = 0;
     for (const t of items) {
       if (t.type === 'expense') { const a = acctById(t.account); if (a) daySumTWD += toTWD(Number(t.amount) || 0, a.currency); }
@@ -518,53 +773,7 @@ function renderTxns() {
     group.innerHTML = `<div class="day-head"><span>${fullDate(date)}</span><span>當日消費 <span class="sum">NT$${Math.round(daySumTWD).toLocaleString('en-US')}</span></span></div>`;
     const list = document.createElement('div');
     list.className = 'txn-list';
-
-    for (const t of items) {
-      const div = document.createElement('div');
-      div.className = 'txn' + (t.id === window._flashId ? ' flash' : '');
-      if (t.type === 'expense') {
-        const a = acctById(t.account);
-        const cur = a ? a.currency : 'JPY';
-        const catTxt = [t.cat, t.subcat].filter(Boolean).join(' › ');
-        div.innerHTML = `
-          <div class="mid">
-            <div class="desc">${escapeHtml(t.item || '（未命名）')}</div>
-            <div class="meta">
-              ${catTxt ? `<span class="cat-badge">${escapeHtml(catTxt)}</span>` : ''}
-              <span class="chip" style="background:${a ? a.color : '#888'}">${a ? escapeHtml(a.name) : '?'}</span>
-              ${t.note ? '<span>· ' + escapeHtml(t.note) + '</span>' : ''}
-            </div>
-          </div>
-          <div class="amt">
-            <div class="v exp">−${fmt(t.amount, cur).replace('-', '')}</div>
-            <div class="twd">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div>
-          </div>
-          <div class="ops">
-            <button class="btn btn-sm" onclick="duplicate('${t.id}')">複製</button>
-            <button class="btn btn-sm" onclick="startEdit('${t.id}')">編輯</button>
-            <button class="btn btn-sm btn-danger" onclick="del('${t.id}')">刪除</button>
-          </div>`;
-      } else {
-        const from = acctById(t.from), to = acctById(t.to);
-        const fc = from ? from.currency : 'JPY', tc = to ? to.currency : 'JPY';
-        const toAmt = t.toAmount != null ? t.toAmount : t.amount;
-        div.innerHTML = `
-          <div class="mid">
-            <div class="desc">${from ? escapeHtml(from.name) : '?'} → ${to ? escapeHtml(to.name) : '?'}</div>
-            <div class="meta"><span class="badge top">儲值/轉帳</span>${t.note ? '<span>· ' + escapeHtml(t.note) + '</span>' : ''}</div>
-          </div>
-          <div class="amt">
-            <div class="v top">${fmt(t.amount, fc)}${fc !== tc ? ' → ' + fmt(toAmt, tc) : ''}</div>
-            <div class="twd">不計入消費</div>
-          </div>
-          <div class="ops">
-            <button class="btn btn-sm" onclick="duplicate('${t.id}')">複製</button>
-            <button class="btn btn-sm" onclick="startEdit('${t.id}')">編輯</button>
-            <button class="btn btn-sm btn-danger" onclick="del('${t.id}')">刪除</button>
-          </div>`;
-      }
-      list.appendChild(div);
-    }
+    for (const t of items) list.appendChild(makeTxnDiv(t, false));
     group.appendChild(list);
     host.appendChild(group);
   }
@@ -754,6 +963,37 @@ function del(id) {
 function setFilter(f) {
   filter = f;
   document.querySelectorAll('.filters [data-f]').forEach(b => b.classList.toggle('active', b.dataset.f === f));
+  renderDateStrip();
+  renderTxns();
+}
+
+/* ===================== 日期篩選列 ===================== */
+function renderDateStrip() {
+  const el = document.getElementById('date-strip');
+  if (!el) return;
+  let base = [...data.txns];
+  if (filter !== 'all') base = base.filter(t => t.type === filter);
+  const groups = {};
+  for (const t of base) (groups[t.date] = groups[t.date] || []).push(t);
+  // 日期膠囊由舊到新（左→右遞增）
+  const dates = Object.keys(groups).sort((a, b) => (a < b ? -1 : 1));
+  // 若目前選的日期已不存在（被刪光或被類型篩掉），回到「全部」
+  if (dateFilter !== 'all' && !dates.includes(dateFilter)) dateFilter = 'all';
+  if (dates.length === 0) { el.innerHTML = ''; return; }
+  let html = `<button class="date-chip ${dateFilter === 'all' ? 'active' : ''}" onclick="setDateFilter('all')">全部<span class="c">${base.length}</span></button>`;
+  html += dates.map(d =>
+    `<button class="date-chip ${dateFilter === d ? 'active' : ''}" onclick="setDateFilter('${d}')">${fullDate(d)}<span class="c">${groups[d].length}</span></button>`
+  ).join('');
+  el.innerHTML = html;
+}
+function setDateFilter(d) {
+  dateFilter = d;
+  renderDateStrip();
+  renderTxns();
+}
+function setSort(v) {
+  sortMode = v;
+  document.querySelectorAll('#sort-strip [data-s]').forEach(b => b.classList.toggle('active', b.dataset.s === v));
   renderTxns();
 }
 
@@ -881,6 +1121,15 @@ function saveSettings() {
 
 /* ===================== 備份 ===================== */
 function exportJSON() { download(`日本記帳備份_${today()}.json`, JSON.stringify(data, null, 2), 'application/json'); }
+// 清洗匯入資料：避免被竄改的 JSON 透過 id/date/color 注入屬性/onclick（縱深防禦）
+function sanitizeImport(d) {
+  d.accounts = (d.accounts || []).map(a => ({ ...a,
+    color: /^#[0-9a-f]{3,8}$/i.test(a.color || '') ? a.color : '#888' }));
+  d.txns = (d.txns || []).map(t => ({ ...t,
+    id: /^[a-z0-9]+$/i.test(t.id || '') ? t.id : genId(),
+    date: /^\d{4}-\d{2}-\d{2}$/.test(t.date || '') ? t.date : today() }));
+  return d;
+}
 function importJSON(e) {
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
@@ -889,7 +1138,7 @@ function importJSON(e) {
       const d = JSON.parse(reader.result);
       if (!d.accounts || !d.txns) throw new Error('檔案格式不正確');
       if (!confirm('匯入會覆蓋目前所有資料，確定？')) return;
-      data = d;
+      data = sanitizeImport(d);
       if (!data.categories) data.categories = defaultData().categories;
       save(); refreshSelects(); render(); closeSettings();
       alert('匯入成功 ✅');
@@ -942,6 +1191,25 @@ function toast(msg) {
 /* 點背景關閉 modal */
 document.getElementById('settings-modal').addEventListener('click', e => { if (e.target.id === 'settings-modal') closeSettings(); });
 document.getElementById('f-toamount').addEventListener('input', () => { toamtTouched = true; });
+
+/* 膠囊列：滑鼠拖曳左右捲動（手機用原生觸控捲動）*/
+function enableDragScroll(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  let down = false, startX = 0, startScroll = 0, moved = false;
+  el.addEventListener('mousedown', e => { down = true; moved = false; startX = e.pageX; startScroll = el.scrollLeft; el.classList.add('dragging'); });
+  window.addEventListener('mouseup', () => { down = false; el.classList.remove('dragging'); });
+  window.addEventListener('mousemove', e => {
+    if (!down) return;
+    const dx = e.pageX - startX;
+    if (Math.abs(dx) > 4) moved = true;
+    el.scrollLeft = startScroll - dx;
+  });
+  // 拖曳結束時若有移動，吃掉這次 click，避免誤觸按鈕
+  el.addEventListener('click', e => { if (moved) { e.preventDefault(); e.stopPropagation(); moved = false; } }, true);
+}
+enableDragScroll('date-strip');
+enableDragScroll('sort-strip');
 
 /* ===================== 啟動 ===================== */
 document.getElementById('f-date').value = today();
