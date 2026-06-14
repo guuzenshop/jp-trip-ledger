@@ -1,0 +1,5 @@
+# 部署 repo 只保留 app 本體，排除審查報告、暫存與其他雜項
+/*
+!/index.html
+!/README.md
+!/.gitignore
