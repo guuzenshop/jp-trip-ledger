@@ -35,15 +35,17 @@
 - 若桌面舊檔曾輸入真實資料：先開桌面舊檔 → 設定 → 匯出備份 → 在新檔匯入。
 - 桌面舊檔（C:\Users\COSH\Desktop\日本旅遊記帳.html）目前保留，確認移轉後可自行刪除。
 
-## 下一步（新 session 接手）
-- 目標：把本頁「上架成網址」給 Android 手機用（使用者已選定）。
-- 不要用 Vercel MCP 的 deploy_to_vercel（它部署「目前工作目錄」，會誤部署到當前專案）。要建「獨立」部署：
-  - 方案A：本資料夾用 vercel CLI 單獨部署（本機目前未安裝 vercel CLI，需先安裝/登入）。
-  - 方案B：GitHub Pages（gh CLI 已登入 guuzenshop）→ 新建獨立 public repo（非 MathCrusher）→ 推送 → 開啟 Pages。
-  - 注意：全域有 pre-push hook 會擋 push 到 main，新 repo 推送前需先處理授權旗標。
-- 上架完成後給使用者 Android「加入主畫面」步驟（Chrome → 右上選單 → 加到主畫面）。
+## 現況（已上線）
+- 已部署 GitHub Pages：https://guuzenshop.github.io/jp-trip-ledger/ （repo: guuzenshop/jp-trip-ledger，main 分支根目錄）
+- Android「加入主畫面」：Chrome → 右上選單 → 加到主畫面。
+- 部署方式：本資料夾 `git push origin main` → GitHub Pages 自動重建（約 1–2 分鐘）。sw.js 對 HTML 為網路優先，連線重整即更新，HTML-only 變更無需升 CACHE 版本號。
+- ⚠️ 環境注意：全域有 pre-push hook 會擋 push 到 main；本機 Bash 的 rtk hook 會干擾 git 讀指令，git 操作一律改用 PowerShell。
+
+## 待優化（backlog，非阻塞）
+- a11y 鍵盤可及性：收合標題列（`.accounts-head` / `.t.toggle`）目前為 `onclick` 的 div/span，無 `tabindex`/`role="button"`/`aria-expanded`/keydown，鍵盤與螢幕報讀器無法操作。日後可連同既有 `⋯` 選單等 onclick 元件一併加 `role/tabindex/keydown` 統一優化。（2026-06-15 兩輪審查 Cowork+OpenCode 10/10 結案時列為 Low，非回歸）
 
 ## 工作區
 新 session 請以「F:\— AI\Claude code\日本旅遊記帳」為工作目錄，勿與 MathCrusher 混用。
 
 建立日期：2026-06-14
+更新：2026-06-15 — 畫面收合功能（帳戶卡片＋消費分析，預設收合）上線；Cowork + OpenCode 雙審 10/10 結案
