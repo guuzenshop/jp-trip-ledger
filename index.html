@@ -47,7 +47,19 @@
   .total-label { color:var(--muted); font-size:13px; }
   .total-big { font-size:30px; font-weight:800; color:#ff5a36; }
   .total-sub { color:var(--muted); font-size:12.5px; margin-top:4px; }
-  .accounts { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; margin-top:14px; }
+  .accounts-head { display:flex; align-items:center; justify-content:space-between; cursor:pointer;
+    margin-top:14px; padding:9px 12px; border:1px solid var(--line); border-radius:10px;
+    background:var(--panel); user-select:none; }
+  .accounts-head .ah-title { font-size:13px; font-weight:700; }
+  .accounts-head .ah-count { color:var(--muted); font-weight:400; font-size:12px; }
+  .accounts-head .ah-arrow { color:var(--muted); font-size:12px; transition:transform .15s ease; }
+  .accounts { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; margin-top:10px; }
+  .summary.acct-collapsed .accounts { display:none; }
+  .summary.acct-collapsed .ah-arrow { transform:rotate(-90deg); }
+  .card-title .t.toggle { cursor:pointer; user-select:none; }
+  .card.chart-collapsed .bars,
+  .card.chart-collapsed .chart-tabs { display:none; }
+  .card.chart-collapsed .ah-arrow { transform:rotate(-90deg); }
   .acct { background:var(--panel); border:1px solid var(--line); border-radius:12px;
     padding:11px 13px; border-left:4px solid var(--green); }
   .acct .name { font-size:12.5px; color:var(--muted); display:flex; justify-content:space-between; align-items:center; }
@@ -202,13 +214,17 @@
     <div class="total-label">總消費（台幣換算）</div>
     <div class="total-big" id="total-twd">NT$0</div>
     <div class="total-sub" id="total-breakdown"></div>
+    <div class="accounts-head" onclick="toggleAccounts()">
+      <span class="ah-title">💳 各帳戶餘額 <span class="ah-count" id="accounts-count"></span></span>
+      <span class="ah-arrow" id="accounts-arrow">▾</span>
+    </div>
     <div class="accounts" id="accounts"></div>
   </div>
 
   <!-- 圖表 -->
-  <div class="card">
+  <div class="card" id="chart-card">
     <div class="card-title">
-      <span class="t">📊 消費分析</span>
+      <span class="t toggle" onclick="toggleChart()">📊 消費分析 <span class="ah-arrow" id="chart-arrow">▾</span></span>
       <div class="chart-tabs">
         <button class="btn btn-sm active" data-c="cat" onclick="setChart('cat')">分類</button>
         <button class="btn btn-sm" data-c="pay" onclick="setChart('pay')">支付方式</button>
@@ -507,6 +523,23 @@ function renderAccounts() {
     }
     el.appendChild(div);
   }
+  const cnt = document.getElementById('accounts-count');
+  if (cnt) cnt.textContent = `（${data.accounts.length} 個）`;
+  let collapsed = true;
+  try { const v = localStorage.getItem('jp_acct_collapsed'); if (v !== null) collapsed = v === '1'; } catch (e) {}
+  document.querySelector('.summary').classList.toggle('acct-collapsed', collapsed);
+}
+
+function toggleAccounts() {
+  const s = document.querySelector('.summary');
+  const collapsed = s.classList.toggle('acct-collapsed');
+  try { localStorage.setItem('jp_acct_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+}
+
+function toggleChart() {
+  const c = document.getElementById('chart-card');
+  const collapsed = c.classList.toggle('chart-collapsed');
+  try { localStorage.setItem('jp_chart_collapsed', collapsed ? '1' : '0'); } catch (e) {}
 }
 
 function renderTotals() {
@@ -522,6 +555,12 @@ function setChart(m) {
   renderChart();
 }
 function renderChart() {
+  const card = document.getElementById('chart-card');
+  if (card) {
+    let cc = true;
+    try { const v = localStorage.getItem('jp_chart_collapsed'); if (v !== null) cc = v === '1'; } catch (e) {}
+    card.classList.toggle('chart-collapsed', cc);
+  }
   const el = document.getElementById('chart');
   const rows = chartMode === 'cat' ? categoryTotals() : paymentTotals();
   if (rows.length === 0) { el.innerHTML = '<div class="empty" style="padding:14px">還沒有「消費」記錄。<br>新增一筆「💸 消費」後，這裡會自動長出分類／支付方式圓餅圖 📊</div>'; return; }
