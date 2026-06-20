@@ -623,7 +623,7 @@ function renderAccounts() {
     } else {
       const out = s.out > 0 ? `　|　已轉出 ${fmt(s.out, a.currency)}` : '';
       div.innerHTML = `
-        <div class="name"><span>${escapeHtml(a.name)}</span><span class="tag">${a.currency}</span></div>
+        <div class="name"><span>${escapeHtml(a.name)}</span><span class="tag">${escapeHtml(a.currency)}</span></div>
         <div class="bal">${fmt(s.balance, a.currency)}</div>
         <div class="detail">額度 ${fmt(s.storedIn, a.currency)}　|　已花 ${fmt(s.spent, a.currency)}${out}</div>
         <div class="twd">餘額 ≒ NT$${Math.round(toTWD(s.balance, a.currency)).toLocaleString('en-US')}</div>`;
@@ -1068,7 +1068,7 @@ function renderTxns() {
 
 /* ===================== 下拉 / 分類 ===================== */
 function refreshSelects() {
-  const opts = data.accounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}（${a.currency}）</option>`).join('');
+  const opts = data.accounts.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}（${escapeHtml(a.currency)}）</option>`).join('');
   ['f-account', 'f-from', 'f-to'].forEach(id => {
     const sel = document.getElementById(id);
     const cur = sel.value;
@@ -1374,7 +1374,7 @@ function renderAcctEditor() {
         <option value="prepaid" ${a.kind === 'prepaid' ? 'selected' : ''}>儲值卡</option>
         <option value="credit" ${a.kind === 'credit' ? 'selected' : ''}>信用卡</option>
       </select>
-      <input type="number" value="${a.initial}" data-i="${i}" data-k="initial" placeholder="初始" title="初始/原有金額" />
+      <input type="number" value="${escapeHtml(a.initial)}" data-i="${i}" data-k="initial" placeholder="初始" title="初始/原有金額" />
       <button class="btn btn-sm btn-danger" onclick="removeAccount(${i})">✕</button>`;
     el.appendChild(row);
   });
@@ -1448,6 +1448,7 @@ function sanitizeImport(d) {
   d.rate = Number(d.rate) > 0 ? Number(d.rate) : defaultData().rate; // 壞匯率 → 退回預設，避免 toTWD 異常
   d.accounts = (d.accounts || []).map(a => ({ ...a,
     currency: CUR.includes(a.currency) ? a.currency : 'JPY',
+    initial: Number(a.initial) || 0, // 數字化，堵死匯入竄改 initial 的注入
     color: /^#[0-9a-f]{3,8}$/i.test(a.color || '') ? a.color : '#888' }));
   const seen = new Set();
   d.txns = (d.txns || []).map(t => {
@@ -1508,7 +1509,9 @@ function exportCSV() {
       rows.push([t.date, '儲值', '', '', (from ? from.name : '') + '→' + (to ? to.name : ''), from ? from.name : '', to ? to.name : '', t.amount, from ? from.currency : '', '', t.note || '']);
     }
   }
-  const csv = '﻿' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  // CSV 公式注入防護：以 = + - @ 開頭的儲存格前綴單引號，避免 Excel/Sheets 當公式執行
+  const csvCell = c => { let s = String(c); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
+  const csv = '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\n');
   download(`日本記帳_${today()}.csv`, csv, 'text/csv');
 }
 function clearAll() {
