@@ -60,6 +60,8 @@
   .card.chart-collapsed .bars,
   .card.chart-collapsed .chart-tabs { display:none; }
   .card.chart-collapsed .ah-arrow { transform:rotate(-90deg); }
+  .card.form-collapsed #entry-form { display:none; }
+  .card.form-collapsed .ah-arrow { transform:rotate(-90deg); }
   .acct { background:var(--panel); border:1px solid var(--line); border-radius:12px;
     padding:11px 13px; border-left:4px solid var(--green); }
   .acct .name { font-size:12.5px; color:var(--muted); display:flex; justify-content:space-between; align-items:center; }
@@ -70,11 +72,11 @@
   .acct .tag { font-size:10px; background:var(--panel2); padding:1px 6px; border-radius:6px; }
 
   .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:14px; }
-  .card-title { font-size:14px; font-weight:700; margin:0 0 12px; display:flex; align-items:center; gap:8px; justify-content:space-between;}
+  .card-title { font-size:14px; font-weight:700; margin:0 0 12px; display:flex; align-items:center; gap:8px; justify-content:space-between; flex-wrap:wrap;}
   .card-title .t { display:flex; align-items:center; gap:8px; }
 
   /* 圖表 */
-  .chart-tabs { display:flex; gap:6px; margin-bottom:12px; }
+  .chart-tabs { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
   .chart-tabs .btn-sm.active { background:var(--green); color:#06281c; border-color:var(--green); font-weight:700; }
   .bars { display:flex; flex-direction:column; gap:9px; }
 
@@ -157,7 +159,8 @@
 
   /* Modal */
   .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none;
-    align-items:flex-start; justify-content:center; padding:18px; z-index:50; overflow-y:auto; }
+    align-items:flex-start; justify-content:center; padding:18px; z-index:50; overflow-y:auto;
+    -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
   .modal-bg.show { display:flex; }
   .modal { background:var(--panel); border:1px solid var(--line); border-radius:16px;
     padding:20px; width:100%; max-width:580px; margin:auto; }
@@ -175,6 +178,44 @@
     opacity:0; transition:.3s; z-index:99; pointer-events:none; font-size:14px; }
   #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 
+  /* 單筆展開（點 .mid 看全文）*/
+  .txn.expanded .desc { white-space:normal; overflow:visible; }
+  .note-mark { display:none; }
+
+  /* 日期膠囊方向切換列 */
+  .date-strip-wrap { display:flex; gap:7px; align-items:flex-start; margin-bottom:10px; }
+  .date-strip-wrap .date-strip { margin-bottom:0; flex:1; min-width:0; }
+  .date-chip.dir-btn { flex-shrink:0; }
+
+  /* 消費分析：勾選清單 + 合計 */
+  .chk-list { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:12px; }
+  .chk { display:inline-flex; align-items:center; gap:6px; background:var(--panel2); border:1px solid var(--line);
+    border-radius:9px; padding:6px 10px; font-size:12.5px; cursor:pointer; user-select:none; }
+  .chk.off { opacity:.45; }
+  .chk input { display:none; }
+  .chk-dot { width:11px; height:11px; border-radius:3px; flex-shrink:0; }
+  .sel-total { font-size:13px; color:var(--muted); margin-bottom:12px; }
+  .sel-total b { color:var(--text); font-weight:700; margin-left:4px; }
+
+  /* 完整分析面板 */
+  .modal-analysis { max-width:680px; }
+  .analysis-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px; }
+  .analysis-head h2 { margin:0; }
+  .analysis-tabs { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
+  .analysis-tabs .btn-sm.active { background:var(--green); color:#06281c; border-color:var(--green); font-weight:700; }
+  .analysis-total { font-size:14px; color:var(--muted); margin-bottom:12px; }
+  .analysis-total b { color:#ff5a36; font-size:20px; margin-left:6px; }
+
+  /* 全選/全不選 + 鑽取明細 */
+  .chk-allbtns { display:flex; gap:7px; margin-bottom:8px; }
+  .drill-hint { font-size:12px; color:var(--muted); margin-bottom:10px; }
+  .drill-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+  .drill-head .drill-title { font-size:13px; color:var(--muted); }
+  .drill-head .drill-title b { color:var(--text); }
+  #analysis-body .leg-row { cursor:pointer; border-radius:8px; }
+  #analysis-body .leg-row:hover { background:var(--panel2); }
+  #analysis-body .pie path, #analysis-body .pie circle { cursor:pointer; }
+
   @media (max-width:560px) {
     .grid-form { grid-template-columns:1fr; }
     .total-big { font-size:26px; }
@@ -189,6 +230,11 @@
     .ops.open .ops-menu { display:flex; }
     .ops-menu .btn-icon { width:100%; height:auto; justify-content:flex-start; padding:9px 12px; font-size:14px; gap:8px; }
     .ops-label { display:inline; }
+    /* 手機版：備註預設收起，展開該筆才完整顯示；以 📝 提示有備註 */
+    .note-text { display:none; }
+    .txn.expanded .note-text { display:inline; }
+    .note-mark { display:inline; }
+    .txn.expanded .note-mark { display:none; }
   }
 </style>
 </head>
@@ -196,7 +242,7 @@
 <div class="wrap">
 
   <header>
-    <h1>🇯🇵 日本旅遊記帳</h1>
+    <h1 id="app-title">🇯🇵 日本旅遊記帳</h1>
     <button class="btn" onclick="openSettings()">⚙️ 設定</button>
   </header>
 
@@ -226,17 +272,18 @@
     <div class="card-title">
       <span class="t toggle" onclick="toggleChart()">📊 消費分析 <span class="ah-arrow" id="chart-arrow">▾</span></span>
       <div class="chart-tabs">
-        <button class="btn btn-sm active" data-c="cat" onclick="setChart('cat')">分類</button>
+        <button class="btn btn-sm active" data-c="cat" onclick="setChart('cat')">大項</button>
+        <button class="btn btn-sm" data-c="sub" onclick="setChart('sub')">小項</button>
         <button class="btn btn-sm" data-c="pay" onclick="setChart('pay')">支付方式</button>
-        <button class="btn btn-sm" onclick="openChartTab()" title="在新分頁開啟完整分析">🔗 新分頁</button>
+        <button class="btn btn-sm" onclick="openAnalysisPanel()" title="開啟完整分析面板">📊 完整分析</button>
       </div>
     </div>
     <div class="bars" id="chart"></div>
   </div>
 
   <!-- 新增表單 -->
-  <div class="card">
-    <div class="card-title"><span class="t">➕ <span id="form-mode-title">新增記錄</span></span></div>
+  <div class="card" id="form-card">
+    <div class="card-title"><span class="t toggle" onclick="toggleForm()">➕ <span id="form-mode-title">新增記錄</span> <span class="ah-arrow" id="form-arrow">▾</span></span></div>
     <form id="entry-form" onsubmit="return submitForm(event)">
       <div class="seg">
         <label><input type="radio" name="ttype" value="expense" checked onchange="onTypeChange()"><span>💸 消費</span></label>
@@ -319,7 +366,10 @@
     <button class="date-chip" data-s="amt_asc" onclick="setSort('amt_asc')">💰 金額低→高</button>
     <button class="date-chip" data-s="manual" onclick="setSort('manual')">✋ 自訂順序</button>
   </div>
-  <div class="date-strip" id="date-strip"></div>
+  <div class="date-strip-wrap" id="date-strip-wrap" style="display:none">
+    <button class="date-chip dir-btn" id="datestrip-dir" onclick="toggleDateStripOrder()" title="切換日期排列方向（舊→新／新→舊）" aria-label="切換日期排列方向">舊→新</button>
+    <div class="date-strip" id="date-strip"></div>
+  </div>
   <div id="txn-list"></div>
 
 </div>
@@ -328,6 +378,12 @@
 <div class="modal-bg" id="settings-modal">
   <div class="modal">
     <h2>⚙️ 設定</h2>
+
+    <div class="field">
+      <label>帳本名稱</label>
+      <input type="text" id="s-ledger-name" maxlength="80" placeholder="例：大阪2026" />
+      <div class="hint">會顯示在標題與匯出檔名，方便分辨不同趟旅程。<br>（PWA 加到主畫面的圖示名由系統決定，不隨此處變動。）</div>
+    </div>
 
     <div class="field">
       <label>匯率（1 元台幣 = ? 日圓）</label>
@@ -354,9 +410,10 @@
         <button class="btn btn-sm" onclick="exportJSON()">⬇️ 匯出備份(JSON)</button>
         <label class="btn btn-sm file-label">⬆️ 匯入備份<input type="file" accept=".json" onchange="importJSON(event)"></label>
         <button class="btn btn-sm" onclick="exportCSV()">📊 匯出 CSV(Excel)</button>
+        <button class="btn btn-sm" onclick="restoreAutobak()">♻️ 還原上次自動備份</button>
         <button class="btn btn-sm btn-danger" onclick="clearAll()">🗑️ 清除全部</button>
       </div>
-      <div class="hint" style="margin-top:8px">⚠️ 資料存在這台裝置的瀏覽器中，清除瀏覽器資料會遺失，請定期匯出備份。</div>
+      <div class="hint" style="margin-top:8px">⚠️ 資料存在這台裝置的瀏覽器中，清除瀏覽器資料會遺失，請定期匯出備份。<br>📱 iPhone（Safari）請「加到主畫面」使用，否則 7 天未開可能被系統自動清除；Brave 若開「離開時清除資料」也會清掉，旅途中請養成匯出習慣。</div>
     </div>
 
     <div class="row-end">
@@ -365,14 +422,33 @@
   </div>
 </div>
 
+<!-- 完整分析面板（App 內全螢幕 overlay）-->
+<div class="modal-bg" id="analysis-modal">
+  <div class="modal modal-analysis">
+    <div class="analysis-head">
+      <h2>📊 完整分析</h2>
+      <button class="btn btn-sm" onclick="closeAnalysis()">✕ 關閉</button>
+    </div>
+    <div class="analysis-tabs">
+      <button class="btn btn-sm active" data-ac="cat" onclick="setAnalysisMode('cat')">大項</button>
+      <button class="btn btn-sm" data-ac="sub" onclick="setAnalysisMode('sub')">小項</button>
+      <button class="btn btn-sm" data-ac="pay" onclick="setAnalysisMode('pay')">支付方式</button>
+    </div>
+    <div class="analysis-total" id="analysis-total"></div>
+    <div id="analysis-body"></div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
 /* ===================== 資料層 ===================== */
 const STORE_KEY = 'jp_trip_ledger_v2';
+const KEYSEP = String.fromCharCode(0); // 小項複合鍵分隔符（NUL，使用者不可能輸入；不回拆、僅當 Map 鍵）
 
 function defaultData() {
   return {
+    ledgerName: '日本旅遊記帳',
     rate: 4.98,
     rateSource: '預設值（尚未更新）',
     rateUpdatedAt: null,
@@ -413,6 +489,7 @@ function load() {
     if (!d.categories) d.categories = def.categories;
     if (d.rateSource === undefined) d.rateSource = '手動設定';
     if (d.rateUpdatedAt === undefined) d.rateUpdatedAt = null;
+    if (typeof d.ledgerName !== 'string' || !d.ledgerName.trim()) d.ledgerName = def.ledgerName;
     return d;
   } catch (e) {
     console.error('讀取失敗，使用預設值', e);
@@ -455,24 +532,47 @@ function computeTotals() {
   return { twd, jpy, totalTWD: twd + toTWD(jpy, 'JPY') };
 }
 
-function categoryTotals() {
+// 依模式彙總消費（'cat'大項 / 'sub'小項[複合鍵] / 'pay'支付方式[帳戶 id]）
+// 回傳 [{key, label, value}]，已排序（大→小），未套用勾選排除
+function chartRows(mode) {
   const m = {};
   for (const t of data.txns) {
     if (t.type !== 'expense') continue;
     const a = acctById(t.account); if (!a) continue;
-    const key = t.cat || '未分類';
-    m[key] = (m[key] || 0) + toTWD(Number(t.amount) || 0, a.currency);
+    const v = toTWD(Number(t.amount) || 0, a.currency);
+    let key, label;
+    if (mode === 'sub') {
+      const cat = t.cat || '未分類', sub = t.subcat || '（無小項）';
+      key = cat + KEYSEP + sub; label = cat + ' › ' + sub;
+    } else if (mode === 'pay') {
+      key = t.account; label = a.name;
+    } else {
+      key = t.cat || '未分類'; label = key;
+    }
+    if (!m[key]) m[key] = { key, label, value: 0 };
+    m[key].value += v;
   }
-  return Object.entries(m).sort((x, y) => y[1] - x[1]);
+  return Object.values(m).sort((x, y) => y.value - x.value);
 }
-function paymentTotals() {
-  const m = {};
-  for (const t of data.txns) {
-    if (t.type !== 'expense') continue;
-    const a = acctById(t.account); if (!a) continue;
-    m[a.name] = (m[a.name] || 0) + toTWD(Number(t.amount) || 0, a.currency);
-  }
-  return Object.entries(m).sort((x, y) => y[1] - x[1]);
+// 顏色綁「鍵」的穩定雜湊：取消某項不會讓其他項顏色位移
+function colorForKey(key) {
+  let h = 0; const s = String(key);
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+// 勾選排除集合（單一真相源，獨立 key、不進 data/匯出）：{cat:[...], sub:[...], pay:[...]}
+function getExcluded() {
+  try { return JSON.parse(localStorage.getItem('jp_chart_excluded') || '{}') || {}; } catch (e) { return {}; }
+}
+function toggleExcluded(mode, key) {
+  const ex = getExcluded();
+  if (!Array.isArray(ex[mode])) ex[mode] = [];
+  const i = ex[mode].indexOf(key);
+  if (i >= 0) ex[mode].splice(i, 1); else ex[mode].push(key);
+  try { localStorage.setItem('jp_chart_excluded', JSON.stringify(ex)); } catch (e) {}
+  renderChart();
+  const am = document.getElementById('analysis-modal');
+  if (am && am.classList.contains('show')) renderAnalysisPanel();
 }
 
 /* ===================== 格式化 ===================== */
@@ -485,6 +585,7 @@ const PALETTE = ['#34d399','#60a5fa','#f472b6','#f59e0b','#a78bfa','#2dd4bf','#f
 
 /* ===================== 渲染 ===================== */
 function render() {
+  renderTitle();
   renderRate();
   renderAccounts();
   renderTotals();
@@ -493,6 +594,12 @@ function render() {
   renderTxns();
 }
 
+function renderTitle() {
+  const name = (data.ledgerName || '日本旅遊記帳').trim() || '日本旅遊記帳';
+  const el = document.getElementById('app-title');
+  if (el) el.textContent = '🇯🇵 ' + name;
+  document.title = name.replace(/[\r\n]+/g, ' ') + ' 🇯🇵';
+}
 function renderRate() {
   document.getElementById('rate-big').textContent = `1 元台幣 ≒ ¥${data.rate}　|　¥100 ≒ NT$${(100 / data.rate).toFixed(1)}`;
   document.getElementById('rate-src').textContent = '來源：' + (data.rateSource || '手動') + (data.rateUpdatedAt ? '（' + data.rateUpdatedAt + '）' : '');
@@ -541,6 +648,21 @@ function toggleChart() {
   const collapsed = c.classList.toggle('chart-collapsed');
   try { localStorage.setItem('jp_chart_collapsed', collapsed ? '1' : '0'); } catch (e) {}
 }
+function toggleForm() {
+  const c = document.getElementById('form-card');
+  const collapsed = c.classList.toggle('form-collapsed');
+  try { localStorage.setItem('jp_form_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+}
+function applyFormCollapsed() {
+  let collapsed = false; // 新使用者預設展開
+  try { const v = localStorage.getItem('jp_form_collapsed'); if (v !== null) collapsed = v === '1'; } catch (e) {}
+  const c = document.getElementById('form-card');
+  if (c) c.classList.toggle('form-collapsed', collapsed);
+}
+function expandForm() {
+  const c = document.getElementById('form-card');
+  if (c) c.classList.remove('form-collapsed');
+}
 
 function renderTotals() {
   const t = computeTotals();
@@ -562,9 +684,50 @@ function renderChart() {
     card.classList.toggle('chart-collapsed', cc);
   }
   const el = document.getElementById('chart');
-  const rows = chartMode === 'cat' ? categoryTotals() : paymentTotals();
-  if (rows.length === 0) { el.innerHTML = '<div class="empty" style="padding:14px">還沒有「消費」記錄。<br>新增一筆「💸 消費」後，這裡會自動長出分類／支付方式圓餅圖 📊</div>'; return; }
-  el.innerHTML = `<div class="chart-wrap">${pieSVG(rows, 180)}<div class="pie-legend">${legendHTML(rows)}</div></div>`;
+  const all = chartRows(chartMode);
+  if (all.length === 0) {
+    el.innerHTML = '<div class="empty" style="padding:14px">還沒有「消費」記錄。<br>新增一筆「💸 消費」後，這裡會自動長出大項／小項／支付方式圓餅圖 📊</div>';
+    return;
+  }
+  el.innerHTML = chartBodyHTML(all, chartMode, 180);
+}
+// 圖表主體（勾選清單 + 合計 + 圓餅）— 內嵌卡片與完整分析面板共用
+function chartBodyHTML(all, mode, pieSize, drillable) {
+  const ex = getExcluded();
+  const exArr = Array.isArray(ex[mode]) ? ex[mode] : [];
+  const isOff = k => exArr.indexOf(k) >= 0;
+  const shown = all.filter(r => !isOff(r.key));
+  const selTotal = shown.reduce((s, r) => s + r.value, 0);
+  const checks = all.map(r => {
+    const on = !isOff(r.key);
+    return `<label class="chk ${on ? '' : 'off'}"><input type="checkbox" ${on ? 'checked' : ''} ` +
+      `data-mode="${mode}" data-key="${encodeURIComponent(r.key)}">` +
+      `<span class="chk-dot" style="background:${colorForKey(r.key)}"></span>${escapeHtml(r.label)}</label>`;
+  }).join('');
+  const allBtns = `<div class="chk-allbtns">` +
+    `<button class="btn btn-sm" onclick="setAllExcluded('${mode}',false)">全選</button>` +
+    `<button class="btn btn-sm" onclick="setAllExcluded('${mode}',true)">全不選</button></div>`;
+  const pie = shown.length
+    ? `<div class="chart-wrap">${pieSVG(shown, pieSize)}<div class="pie-legend">${legendHTML(shown)}</div></div>`
+    : '<div class="empty" style="padding:14px">未選擇任何項目，請按「全選」或勾選上方項目以顯示圖表。</div>';
+  const hint = (drillable && shown.length) ? '<div class="drill-hint">👆 點圓餅或下方項目，可看每一筆明細</div>' : '';
+  return allBtns + `<div class="chk-list">${checks}</div>` +
+    `<div class="sel-total">合計（已選）<b>${fmt(selTotal, 'TWD')}</b></div>` + hint + pie;
+}
+// 全選（清空排除）/ 全不選（排除全部），作用於目前模式
+function setAllExcluded(mode, excludeAll) {
+  const ex = getExcluded();
+  ex[mode] = excludeAll ? chartRows(mode).map(r => r.key) : [];
+  try { localStorage.setItem('jp_chart_excluded', JSON.stringify(ex)); } catch (e) {}
+  renderChart();
+  const am = document.getElementById('analysis-modal');
+  if (am && am.classList.contains('show')) renderAnalysisPanel();
+}
+// 勾選清單事件委派（key 含特殊字元，改用 data-key 傳遞，避免 inline onclick 引號問題）
+function onChartCheckChange(e) {
+  const cb = e.target;
+  if (!cb || !cb.matches || !cb.matches('input[type="checkbox"][data-key]')) return;
+  toggleExcluded(cb.dataset.mode, decodeURIComponent(cb.dataset.key));
 }
 
 /* 圓餅圖（純 SVG，零外掛） */
@@ -578,64 +741,123 @@ function arcPath(cx, cy, r, start, end) {
   return `M${cx},${cy} L${s.x},${s.y} A${r},${r} 0 ${large} 1 ${e.x},${e.y} Z`;
 }
 function pieSVG(rows, size) {
-  const total = rows.reduce((s, r) => s + r[1], 0) || 1;
+  const total = rows.reduce((s, r) => s + r.value, 0) || 1;
   const cx = size / 2, cy = size / 2, r = size / 2 - 4;
   let acc = 0, segs = '';
-  rows.forEach((row, i) => {
-    const frac = row[1] / total, start = acc * 360; acc += frac; const end = acc * 360;
-    const color = PALETTE[i % PALETTE.length];
+  rows.forEach((row) => {
+    const frac = row.value / total, start = acc * 360; acc += frac; const end = acc * 360;
+    const color = colorForKey(row.key);
+    const dk = encodeURIComponent(row.key);
     segs += frac >= 0.9999
-      ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"/>`
-      : `<path d="${arcPath(cx, cy, r, start, end)}" fill="${color}" stroke="#1a1d24" stroke-width="1.5"/>`;
+      ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" data-drill="${dk}"/>`
+      : `<path d="${arcPath(cx, cy, r, start, end)}" fill="${color}" stroke="#1a1d24" stroke-width="1.5" data-drill="${dk}"/>`;
   });
-  return `<svg class="pie" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${segs}</svg>`;
+  return `<svg class="pie" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="max-width:100%;height:auto">${segs}</svg>`;
 }
 function legendHTML(rows) {
-  const total = rows.reduce((s, r) => s + r[1], 0) || 1;
-  return rows.map((row, i) => {
-    const pct = Math.round(row[1] / total * 100), color = PALETTE[i % PALETTE.length];
-    return `<div class="leg-row"><span class="leg-dot" style="background:${color}"></span>` +
-      `<span class="leg-name">${escapeHtml(row[0])}</span>` +
-      `<span class="leg-val">NT$${Math.round(row[1]).toLocaleString('en-US')} <small>${pct}%</small></span></div>`;
+  const total = rows.reduce((s, r) => s + r.value, 0) || 1;
+  return rows.map((row) => {
+    const pct = Math.round(row.value / total * 100), color = colorForKey(row.key);
+    return `<div class="leg-row" data-drill="${encodeURIComponent(row.key)}"><span class="leg-dot" style="background:${color}"></span>` +
+      `<span class="leg-name">${escapeHtml(row.label)}</span>` +
+      `<span class="leg-val">NT$${Math.round(row.value).toLocaleString('en-US')} <small>${pct}%</small></span></div>`;
   }).join('');
 }
 
-/* 在新分頁開啟完整分析（分類＋支付方式，純前端快照） */
-function openChartTab() {
-  const cat = categoryTotals(), pay = paymentTotals();
-  if (cat.length === 0 && pay.length === 0) { toast('還沒有消費記錄可分析'); return; }
-  const w = window.open('', '_blank');
-  if (!w) { alert('瀏覽器阻擋了新分頁，請允許此網站的彈出視窗後再試一次。'); return; }
-  const section = (title, rows) => rows.length
-    ? `<div class="sec"><h2>${title}</h2><div class="cw">${pieSVG(rows, 260)}<div class="lg">${legendHTML(rows)}</div></div></div>`
-    : '';
+/* ===================== 完整分析面板（App 內全螢幕 overlay）===================== */
+let _scrollY = 0, _scrollLocked = false;
+function lockScroll(on) {
+  const b = document.body;
+  if (on) {
+    if (_scrollLocked) return;          // 用獨立旗標（非偵測 body.position），避免被其他 modal 的背景鎖污染
+    _scrollLocked = true;
+    _scrollY = window.scrollY || window.pageYOffset || 0;
+    b.style.position = 'fixed';
+    b.style.top = `-${_scrollY}px`;
+    b.style.left = '0'; b.style.right = '0'; b.style.width = '100%';
+  } else {
+    if (!_scrollLocked) return;
+    _scrollLocked = false;
+    b.style.position = ''; b.style.top = '';
+    b.style.left = ''; b.style.right = ''; b.style.width = '';
+    window.scrollTo(0, _scrollY);
+  }
+}
+function syncAnalysisTabs() {
+  document.querySelectorAll('.analysis-tabs [data-ac]').forEach(b => b.classList.toggle('active', b.dataset.ac === chartMode));
+}
+function openAnalysisPanel() {
+  const m = document.getElementById('analysis-modal');
+  if (m.classList.contains('show')) return; // 冪等：防快速雙擊疊加 pushState
+  lockScroll(true);
+  m.classList.add('show');
+  syncAnalysisTabs();
+  renderAnalysisPanel();
+  try { history.pushState({ modal: 'analysis' }, ''); } catch (e) {}
+}
+function closeAnalysis(fromPop) {
+  const m = document.getElementById('analysis-modal');
+  if (!m.classList.contains('show')) return;
+  m.classList.remove('show');
+  lockScroll(false);
+  if (!fromPop) { try { if (history.state && history.state.modal === 'analysis') history.back(); } catch (e) {} }
+}
+function setAnalysisMode(m) {
+  chartMode = m;
+  syncAnalysisTabs();
+  document.querySelectorAll('.chart-tabs [data-c]').forEach(b => b.classList.toggle('active', b.dataset.c === m));
+  renderChart();
+  renderAnalysisPanel();
+}
+function renderAnalysisPanel() {
   const t = computeTotals();
-  const html = `<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>消費分析 — 日本旅遊記帳</title>
-<style>
-  body{margin:0;background:#0f1115;color:#e8eaed;padding:20px;
-    font-family:"Noto Sans TC","Microsoft JhengHei",-apple-system,"Segoe UI",system-ui,sans-serif;}
-  .wrap{max-width:760px;margin:0 auto;}
-  h1{font-size:20px;margin:0 0 4px;} .total{font-size:14px;color:#9aa3b2;margin-bottom:18px;}
-  .total b{color:#ff5a36;font-size:22px;margin-left:6px;}
-  .sec{background:#1a1d24;border:1px solid #2e3340;border-radius:16px;padding:18px;margin-bottom:16px;}
-  h2{font-size:15px;margin:0 0 14px;}
-  .cw{display:flex;gap:22px;align-items:center;flex-wrap:wrap;justify-content:center;}
-  .lg{flex:1;min-width:220px;display:flex;flex-direction:column;gap:9px;}
-  .leg-row{display:flex;align-items:center;gap:9px;font-size:14px;}
-  .leg-dot{width:14px;height:14px;border-radius:4px;flex-shrink:0;}
-  .leg-name{color:#9aa3b2;flex:1;}
-  .leg-val{font-weight:600;} .leg-val small{color:#9aa3b2;font-weight:400;}
-  .tip{color:#9aa3b2;font-size:12px;text-align:center;margin-top:8px;}
-</style></head><body><div class="wrap">
-<h1>📊 消費分析</h1>
-<div class="total">總消費（台幣換算）<b>${fmt(t.totalTWD, 'TWD')}</b></div>
-${section('依分類佔比', cat)}
-${section('依支付方式佔比', pay)}
-<div class="tip">此頁為目前資料的快照（${nowStr()}）。關閉後可隨時從 App 的「🔗 新分頁」再次開啟。</div>
-</div></body></html>`;
-  w.document.open(); w.document.write(html); w.document.close();
+  const totalEl = document.getElementById('analysis-total');
+  if (totalEl) totalEl.innerHTML = `總消費（台幣換算）<b>${fmt(t.totalTWD, 'TWD')}</b>`;
+  const body = document.getElementById('analysis-body');
+  if (!body) return;
+  const all = chartRows(chartMode);
+  if (all.length === 0) { body.innerHTML = '<div class="empty">還沒有消費記錄可分析。</div>'; return; }
+  body.innerHTML = chartBodyHTML(all, chartMode, 240, true);
+}
+// 鑽取：取某模式某 key 對應的所有消費筆 / 顯示標籤 / 唯讀明細列
+function txnsForKey(mode, key) {
+  return data.txns.filter(t => {
+    if (t.type !== 'expense') return false;
+    const a = acctById(t.account); if (!a) return false;
+    if (mode === 'sub') return ((t.cat || '未分類') + KEYSEP + (t.subcat || '（無小項）')) === key;
+    if (mode === 'pay') return t.account === key;
+    return (t.cat || '未分類') === key;
+  });
+}
+function drillLabel(mode, key) {
+  if (mode === 'sub') { const p = key.split(KEYSEP); return p[0] + ' › ' + (p[1] || ''); }
+  if (mode === 'pay') { const a = acctById(key); return a ? a.name : '（未知帳戶）'; }
+  return key;
+}
+function drillRowHTML(t) {
+  const a = acctById(t.account); const cur = a ? a.currency : 'JPY';
+  const catTxt = [t.cat, t.subcat].filter(Boolean).join(' › ');
+  return `<div class="txn"><div class="mid">` +
+    `<div class="desc" style="white-space:normal">${escapeHtml(t.item || '（未命名）')}</div>` +
+    `<div class="meta"><span class="cat-badge">${fullDate(t.date)}</span>` +
+    (catTxt ? `<span class="cat-badge">${escapeHtml(catTxt)}</span>` : '') +
+    `<span class="chip" style="background:${escapeHtml(a ? a.color : '#888')}">${a ? escapeHtml(a.name) : '?'}</span>` +
+    (t.note ? `<span>· ${escapeHtml(t.note)}</span>` : '') + `</div></div>` +
+    `<div class="amt"><div class="v exp">−${fmt(t.amount, cur).replace('-', '')}</div>` +
+    `<div class="twd">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div></div></div>`;
+}
+function renderDrilldown(mode, key) {
+  const body = document.getElementById('analysis-body');
+  if (!body) return;
+  const list = txnsForKey(mode, key).slice().sort((a, b) => a.date < b.date ? 1 : (a.date > b.date ? -1 : 0));
+  let sum = 0;
+  for (const t of list) { const a = acctById(t.account); if (a) sum += toTWD(Number(t.amount) || 0, a.currency); }
+  let html = `<div class="drill-head"><button class="btn btn-sm" onclick="renderAnalysisPanel()">← 返回分析</button>` +
+    `<span class="drill-title">${escapeHtml(drillLabel(mode, key))}　<b>${list.length} 筆</b>　${fmt(sum, 'TWD')}</span></div>`;
+  html += list.length
+    ? `<div class="txn-list">${list.map(drillRowHTML).join('')}</div>`
+    : '<div class="empty">沒有符合的記錄。</div>';
+  body.innerHTML = html;
 }
 
 // 單筆台幣換算值（跨幣別比大小用）
@@ -653,12 +875,12 @@ function txnInnerHTML(t, showDate) {
     const catTxt = [t.cat, t.subcat].filter(Boolean).join(' › ');
     return `
       <div class="mid">
-        <div class="desc">${escapeHtml(t.item || '（未命名）')}</div>
+        <div class="desc" title="${escapeHtml(t.item || '（未命名）')}">${escapeHtml(t.item || '（未命名）')}</div>
         <div class="meta">
           ${dateTag}
           ${catTxt ? `<span class="cat-badge">${escapeHtml(catTxt)}</span>` : ''}
           <span class="chip" style="background:${escapeHtml(a ? a.color : '#888')}">${a ? escapeHtml(a.name) : '?'}</span>
-          ${t.note ? '<span>· ' + escapeHtml(t.note) + '</span>' : ''}
+          ${t.note ? '<span class="note-mark">📝</span><span class="note-text">· ' + escapeHtml(t.note) + '</span>' : ''}
         </div>
       </div>
       <div class="amt">
@@ -673,7 +895,7 @@ function txnInnerHTML(t, showDate) {
   return `
       <div class="mid">
         <div class="desc">${from ? escapeHtml(from.name) : '?'} → ${to ? escapeHtml(to.name) : '?'}</div>
-        <div class="meta">${dateTag}<span class="badge top">儲值/轉帳</span>${t.note ? '<span>· ' + escapeHtml(t.note) + '</span>' : ''}</div>
+        <div class="meta">${dateTag}<span class="badge top">儲值/轉帳</span>${t.note ? '<span class="note-mark">📝</span><span class="note-text">· ' + escapeHtml(t.note) + '</span>' : ''}</div>
       </div>
       <div class="amt">
         <div class="v top">${fmt(t.amount, fc)}${fc !== tc ? ' → ' + fmt(toAmt, tc) : ''}</div>
@@ -996,6 +1218,7 @@ function startEdit(id) {
   const t = data.txns.find(x => x.id === id);
   if (!t) return;
   editingId = id;
+  expandForm();
   fillForm(t);
   document.getElementById('form-mode-title').textContent = '編輯記錄';
   document.getElementById('f-submit').textContent = '儲存修改';
@@ -1005,6 +1228,7 @@ function duplicate(id) {
   const t = data.txns.find(x => x.id === id);
   if (!t) return;
   editingId = null;            // 視為「新增」，不覆蓋原本那筆
+  expandForm();
   fillForm(t);
   document.getElementById('form-mode-title').textContent = '新增記錄（已複製，改完按新增）';
   document.getElementById('f-submit').textContent = '新增';
@@ -1032,18 +1256,31 @@ function setFilter(f) {
 }
 
 /* ===================== 日期篩選列 ===================== */
+function dateStripOrder() {
+  try { return localStorage.getItem('jp_datestrip_order') === 'desc' ? 'desc' : 'asc'; } catch (e) { return 'asc'; }
+}
+function toggleDateStripOrder() {
+  const next = dateStripOrder() === 'asc' ? 'desc' : 'asc';
+  try { localStorage.setItem('jp_datestrip_order', next); } catch (e) {}
+  renderDateStrip();
+}
 function renderDateStrip() {
   const el = document.getElementById('date-strip');
+  const wrap = document.getElementById('date-strip-wrap');
   if (!el) return;
   let base = [...data.txns];
   if (filter !== 'all') base = base.filter(t => t.type === filter);
   const groups = {};
   for (const t of base) (groups[t.date] = groups[t.date] || []).push(t);
-  // 日期膠囊由舊到新（左→右遞增）
-  const dates = Object.keys(groups).sort((a, b) => (a < b ? -1 : 1));
+  // 日期膠囊排列方向：asc 舊→新（左→右遞增）/ desc 新→舊
+  const asc = dateStripOrder() === 'asc';
+  const dates = Object.keys(groups).sort((a, b) => asc ? (a < b ? -1 : 1) : (a < b ? 1 : -1));
   // 若目前選的日期已不存在（被刪光或被類型篩掉），回到「全部」
   if (dateFilter !== 'all' && !dates.includes(dateFilter)) dateFilter = 'all';
-  if (dates.length === 0) { el.innerHTML = ''; return; }
+  if (dates.length === 0) { el.innerHTML = ''; if (wrap) wrap.style.display = 'none'; return; }
+  if (wrap) wrap.style.display = 'flex';
+  const dirBtn = document.getElementById('datestrip-dir');
+  if (dirBtn) dirBtn.textContent = asc ? '舊→新' : '新→舊';
   let html = `<button class="date-chip ${dateFilter === 'all' ? 'active' : ''}" onclick="setDateFilter('all')">全部<span class="c">${base.length}</span></button>`;
   html += dates.map(d =>
     `<button class="date-chip ${dateFilter === d ? 'active' : ''}" onclick="setDateFilter('${d}')">${fullDate(d)}<span class="c">${groups[d].length}</span></button>`
@@ -1114,6 +1351,7 @@ async function updateRate() {
 
 /* ===================== 設定 ===================== */
 function openSettings() {
+  document.getElementById('s-ledger-name').value = data.ledgerName || '';
   document.getElementById('s-rate').value = data.rate;
   document.getElementById('s-cats').value = serializeCats(data.categories);
   renderAcctEditor();
@@ -1175,6 +1413,8 @@ function saveSettings() {
     if (k === 'name') v = v.trim() || '未命名';
     data.accounts[i][k] = v;
   });
+  const ln = (document.getElementById('s-ledger-name').value || '').trim().slice(0, 80);
+  data.ledgerName = ln || '日本旅遊記帳';
   const r = Number(document.getElementById('s-rate').value);
   if (r > 0 && r !== data.rate) { data.rate = r; data.rateSource = '手動設定'; data.rateUpdatedAt = nowStr(); }
   const cats = parseCats(document.getElementById('s-cats').value);
@@ -1184,14 +1424,42 @@ function saveSettings() {
 }
 
 /* ===================== 備份 ===================== */
-function exportJSON() { download(`日本記帳備份_${today()}.json`, JSON.stringify(data, null, 2), 'application/json'); }
-// 清洗匯入資料：避免被竄改的 JSON 透過 id/date/color 注入屬性/onclick（縱深防禦）
+function exportJSON() { download(`${sanitizeFilename(data.ledgerName)}_${today()}.json`, JSON.stringify(data, null, 2), 'application/json'); }
+// 帳本名稱 → 安全檔名（去非法字元、控制字元、emoji/符號、限長）
+function sanitizeFilename(s) {
+  let name = String(s || '').trim().replace(/[\/\\:*?"<>|]/g, '');
+  let out = '';
+  for (const ch of name) {
+    const cp = ch.codePointAt(0);
+    if (cp < 0x20) continue;                      // 控制字元
+    if (cp >= 0x1F000) continue;                  // emoji/符號星形面
+    if (cp >= 0x2600 && cp <= 0x27BF) continue;   // 雜項/裝飾符號
+    if (cp === 0xFE0F || cp === 0x20E3 || cp === 0x200D) continue; // 變體選擇子 / keycap / ZWJ
+    out += ch;
+  }
+  out = out.replace(/\s+/g, ' ').trim();
+  if (!out) out = '日本記帳';
+  return out.slice(0, 40);
+}
+// 清洗匯入資料：避免被竄改的 JSON 注入或污染（縱深防禦）
 function sanitizeImport(d) {
+  const CUR = ['JPY', 'TWD'];
+  d.ledgerName = (typeof d.ledgerName === 'string' && d.ledgerName.trim()) ? d.ledgerName.trim().slice(0, 80) : '日本旅遊記帳';
+  d.rate = Number(d.rate) > 0 ? Number(d.rate) : defaultData().rate; // 壞匯率 → 退回預設，避免 toTWD 異常
   d.accounts = (d.accounts || []).map(a => ({ ...a,
+    currency: CUR.includes(a.currency) ? a.currency : 'JPY',
     color: /^#[0-9a-f]{3,8}$/i.test(a.color || '') ? a.color : '#888' }));
-  d.txns = (d.txns || []).map(t => ({ ...t,
-    id: /^[a-z0-9]+$/i.test(t.id || '') ? t.id : genId(),
-    date: /^\d{4}-\d{2}-\d{2}$/.test(t.date || '') ? t.date : today() }));
+  const seen = new Set();
+  d.txns = (d.txns || []).map(t => {
+    let id = /^[a-z0-9]+$/i.test(t.id || '') ? t.id : genId();
+    while (seen.has(id)) id = genId(); // 去重：撞號重發直到唯一，避免拖曳/編輯誤指
+    seen.add(id);
+    return { ...t, id,
+      type: (t.type === 'expense' || t.type === 'topup') ? t.type : 'expense',
+      amount: Number(t.amount) || 0,
+      toAmount: t.toAmount != null ? (Number(t.toAmount) || 0) : t.toAmount,
+      date: /^\d{4}-\d{2}-\d{2}$/.test(t.date || '') ? t.date : today() };
+  });
   return d;
 }
 function importJSON(e) {
@@ -1201,14 +1469,33 @@ function importJSON(e) {
     try {
       const d = JSON.parse(reader.result);
       if (!d.accounts || !d.txns) throw new Error('檔案格式不正確');
-      if (!confirm('匯入會覆蓋目前所有資料，確定？')) return;
+      const incoming = (typeof d.ledgerName === 'string' && d.ledgerName.trim()) ? d.ledgerName.trim() : '（未命名帳本）';
+      const current = data.ledgerName || '日本旅遊記帳';
+      if (!confirm(`匯入會覆蓋目前所有資料。\n\n目前：「${current}」\n匯入：「${incoming}」\n\n系統會先自動備份目前資料（僅保留最近一次，可在設定中還原）。\n確定匯入？`)) return;
+      try { localStorage.setItem('jp_trip_ledger_v2_autobak', JSON.stringify(data)); }
+      catch (err) { if (!confirm('⚠️ 自動備份目前資料失敗（可能空間不足）。\n繼續匯入將無法自動還原舊資料，建議先手動「匯出備份」。\n仍要繼續匯入嗎？')) return; }
       data = sanitizeImport(d);
       if (!data.categories) data.categories = defaultData().categories;
       save(); refreshSelects(); render(); closeSettings();
-      alert('匯入成功 ✅');
+      alert('匯入成功 ✅\n（如需復原，請到「⚙️設定 → ♻️還原上次自動備份」）');
     } catch (err) { alert('匯入失敗：' + err.message); }
   };
   reader.readAsText(file); e.target.value = '';
+}
+function restoreAutobak() {
+  let raw = null;
+  try { raw = localStorage.getItem('jp_trip_ledger_v2_autobak'); } catch (e) {}
+  if (!raw) { alert('目前沒有可還原的自動備份。\n（每次「匯入備份」前會自動建立一份。）'); return; }
+  let d;
+  try { d = JSON.parse(raw); } catch (e) { alert('自動備份資料毀損，無法還原。'); return; }
+  if (!d || !d.accounts || !d.txns) { alert('自動備份內容不完整，無法還原。'); return; }
+  if (!confirm('還原會用「上次匯入前的自動備份」覆蓋目前資料。\n（目前資料會被存成新的自動備份，可再按一次還原切回。）\n確定還原？')) return;
+  const cur = JSON.stringify(data); // 還原前先留存目前資料，讓還原可逆
+  data = sanitizeImport(d);
+  if (!data.categories) data.categories = defaultData().categories;
+  try { localStorage.setItem('jp_trip_ledger_v2_autobak', cur); } catch (e) {}
+  save(); refreshSelects(); render(); closeSettings();
+  alert('已還原上次自動備份 ✅');
 }
 function exportCSV() {
   const rows = [['日期', '類型', '大項', '小項', '品項/說明', '從帳戶', '到帳戶', '金額', '幣別', '台幣換算', '備註']];
@@ -1254,9 +1541,33 @@ function toast(msg) {
 
 /* 點背景關閉 modal */
 document.getElementById('settings-modal').addEventListener('click', e => { if (e.target.id === 'settings-modal') closeSettings(); });
+document.getElementById('analysis-modal').addEventListener('click', e => { if (e.target.id === 'analysis-modal') closeAnalysis(); });
 document.getElementById('f-toamount').addEventListener('input', () => { toamtTouched = true; });
 /* 點選單以外處關閉「⋯」操作選單（toggleOps 已 stopPropagation，不會誤關自己）*/
 document.addEventListener('click', closeAllOps);
+/* Esc 關閉最上層 modal；Android 返回鍵（popstate）關閉分析面板 */
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('analysis-modal').classList.contains('show')) closeAnalysis();
+  else if (document.getElementById('settings-modal').classList.contains('show')) closeSettings();
+});
+window.addEventListener('popstate', () => closeAnalysis(true));
+/* 消費分析勾選清單（事件委派；內嵌卡片 + 完整分析面板共用）*/
+document.getElementById('chart').addEventListener('change', onChartCheckChange);
+document.getElementById('analysis-modal').addEventListener('change', onChartCheckChange);
+/* 完整分析：點圓餅扇形或圖例某項 → 鑽取該項每一筆明細（與勾選框分開、不打架）*/
+document.getElementById('analysis-modal').addEventListener('click', e => {
+  const el = e.target.closest && e.target.closest('[data-drill]');
+  if (el) renderDrilldown(chartMode, decodeURIComponent(el.dataset.drill));
+});
+/* 單筆點內容區（.mid）展開看全文；自訂排序模式停用，避免和拖曳搶手勢 */
+document.getElementById('txn-list').addEventListener('click', e => {
+  if (sortMode === 'manual') return;
+  const mid = e.target.closest && e.target.closest('.mid');
+  if (!mid) return;
+  const row = mid.closest('.txn');
+  if (row) row.classList.toggle('expanded');
+});
 
 /* 膠囊列：滑鼠拖曳左右捲動（手機用原生觸控捲動）*/
 function enableDragScroll(id) {
@@ -1282,9 +1593,17 @@ document.getElementById('f-date').value = today();
 refreshSelects();
 onTypeChange();
 render();
+applyFormCollapsed();
 
 /* Service Worker：離線可用（僅 https/http 註冊；file:// 本機雙擊不註冊以免報錯）*/
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.protocol === 'http:')) {
+  /* 換版後自動刷新當前分頁；但「首次安裝」（載入時尚無 controller）不刷新，避免首訪多閃一次 */
+  const _hadController = !!navigator.serviceWorker.controller;
+  let _swReloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!_hadController || _swReloaded) return; // 首裝不刷新；換版只刷新一次
+    _swReloaded = true; location.reload();
+  });
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   });
