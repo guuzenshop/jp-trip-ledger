@@ -236,6 +236,66 @@
     .note-mark { display:inline; }
     .txn.expanded .note-mark { display:none; }
   }
+
+  /* ===================== 分帳（多人分攤）===================== */
+  .card.split-collapsed #split-body { display:none; }
+  .card.split-collapsed .ah-arrow { transform:rotate(-90deg); }
+  .split-sub { font-size:12.5px; color:var(--muted); font-weight:700; margin:0 0 8px; }
+  .split-members { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:6px; }
+  .mbr-chip { display:inline-flex; align-items:center; gap:7px; background:var(--panel2); border:1px solid var(--line);
+    border-radius:9px; padding:6px 11px; font-size:13.5px; }
+  .mbr-chip .nm { cursor:pointer; }
+  .mbr-chip .del { cursor:pointer; color:var(--muted); font-size:13px; line-height:1; }
+  .mbr-chip .del:hover { color:var(--red); }
+  .mbr-add { background:transparent; border:1px dashed var(--line); color:var(--muted); border-radius:9px;
+    padding:6px 11px; font-size:13px; cursor:pointer; }
+  .mbr-chip .nm-input { background:transparent; border:none; border-bottom:1px dashed transparent; color:inherit; font-size:13.5px; font-family:inherit; width:5.5em; padding:1px 0; outline:none; }
+  .mbr-chip .nm-input:focus { border-bottom-color:var(--blue); }
+  .mbr-new { border-style:dashed; }
+  .mbr-new .nm-input { width:6.5em; }
+  .mbr-addbtn { color:var(--green) !important; font-weight:700; font-size:16px; cursor:pointer; }
+  .split-hidden { display:none; }
+  .split-toggle { display:flex; align-items:center; gap:8px; cursor:pointer; font-size:14px; }
+  .split-toggle input { width:18px; height:18px; flex-shrink:0; }
+  .split-undo { background:#1f2a22; border:1px solid var(--line); border-radius:9px; padding:8px 11px; margin-bottom:8px; font-size:13px; color:var(--muted); display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .split-list { display:flex; flex-direction:column; gap:8px; }
+  .split-item { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:11px 13px;
+    display:flex; align-items:center; gap:11px; }
+  .split-item.review { border-color:var(--amber); background:#241f0e; }
+  .split-item .mid { flex:1; min-width:0; }
+  .split-item .desc { font-size:14.5px; font-weight:600; }
+  .split-item .meta { font-size:11.5px; color:var(--muted); margin-top:3px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .split-item .shares-line { font-size:11px; color:var(--muted); margin-top:3px; }
+  .split-item .amt { text-align:right; flex-shrink:0; }
+  .split-item .amt .v { font-size:15px; font-weight:700; color:var(--blue); }
+  .split-item .amt .twd { font-size:11px; color:var(--muted); }
+  .split-item .ops { display:flex; gap:6px; flex-shrink:0; }
+  .review-tag { font-size:10px; background:#3a2f10; color:var(--amber); padding:1px 6px; border-radius:6px; }
+  .warn-tag { font-size:10px; background:#3a2f10; color:var(--amber); padding:1px 6px; border-radius:6px; }
+  .settle-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:16px 0 10px; }
+  .settle-box { background:linear-gradient(135deg,#15251d,#121a16); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .settle-row { display:flex; align-items:center; gap:9px; font-size:14.5px; padding:7px 0; border-bottom:1px solid var(--line); }
+  .settle-row:last-child { border-bottom:none; }
+  .settle-row .pay { font-weight:700; }
+  .settle-row .arrow { color:var(--muted); }
+  .settle-row .sum { margin-left:auto; font-weight:700; color:var(--green); }
+  .settle-net { font-size:12px; color:var(--muted); margin-top:10px; line-height:1.9; }
+  .settle-net .pos { color:var(--green); font-weight:600; } .settle-net .neg { color:var(--red); font-weight:600; }
+  .settle-note { font-size:11px; color:var(--muted); margin-top:8px; }
+  .split-empty { text-align:center; color:var(--muted); padding:18px; font-size:13px; }
+  .seg-mini { display:inline-flex; background:var(--panel2); border-radius:9px; padding:3px; gap:3px; flex-wrap:wrap; }
+  .seg-mini label { padding:6px 13px; border-radius:7px; cursor:pointer; font-size:13px; color:var(--muted); user-select:none; }
+  .seg-mini input { display:none; }
+  .seg-mini label:has(input:checked) { background:var(--green); }
+  .seg-mini label:has(input:checked) span { color:#06281c; font-weight:700; }
+  .part-list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+  .part-row { display:flex; align-items:center; gap:10px; }
+  .part-row .pn { flex:1; font-size:14px; }
+  .part-row input[type=number] { width:130px; }
+  .part-row .chk2 { display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none; font-size:14px; }
+  .part-row .pp { font-size:11.5px; color:var(--muted); min-width:90px; text-align:right; }
+  .split-balance { font-size:12.5px; margin-top:10px; }
+  .split-balance.bad { color:var(--red); } .split-balance.ok { color:var(--green); }
 </style>
 </head>
 <body>
@@ -372,6 +432,30 @@
   </div>
   <div id="txn-list"></div>
 
+  <!-- 👥 分帳（多人分攤）-->
+  <div class="card" id="split-card">
+    <div class="card-title">
+      <span class="t toggle" onclick="toggleSplit()">👥 分帳（多人分攤） <span class="ah-arrow" id="split-arrow">▾</span></span>
+    </div>
+    <div id="split-body">
+      <div class="split-sub">同行成員</div>
+      <div class="split-members" id="split-members"></div>
+      <div class="settle-head">
+        <span class="split-sub" style="margin:0">分帳費用</span>
+        <button class="btn btn-sm btn-primary" onclick="openSplitForm()">＋ 新增分帳費用</button>
+      </div>
+      <div id="split-list"></div>
+      <div class="settle-head">
+        <span class="split-sub" style="margin:0">💡 結算（精簡轉帳）</span>
+        <div class="seg-mini" id="settle-cur">
+          <label><input type="radio" name="settlecur" value="TWD" checked onchange="setSettleCur('TWD')"><span>台幣</span></label>
+          <label><input type="radio" name="settlecur" value="JPY" onchange="setSettleCur('JPY')"><span>日幣</span></label>
+        </div>
+      </div>
+      <div id="settle-box"></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- 設定 Modal -->
@@ -383,6 +467,12 @@
       <label>帳本名稱</label>
       <input type="text" id="s-ledger-name" maxlength="80" placeholder="例：大阪2026" />
       <div class="hint">會顯示在標題與匯出檔名，方便分辨不同趟旅程。<br>（PWA 加到主畫面的圖示名由系統決定，不隨此處變動。）</div>
+    </div>
+
+    <div class="field">
+      <label>多人分攤功能</label>
+      <label class="split-toggle"><input type="checkbox" id="s-split-enabled" /> 在首頁顯示「👥 分帳（多人分攤）」欄位</label>
+      <div class="hint">單人旅遊可關閉，首頁就不會出現分帳區。已輸入的成員與分帳資料會保留，重新開啟即回來。</div>
     </div>
 
     <div class="field">
@@ -439,6 +529,59 @@
   </div>
 </div>
 
+<!-- 分帳費用 新增/編輯 Modal -->
+<div class="modal-bg" id="split-modal">
+  <div class="modal">
+    <h2 id="split-modal-title">新增分帳費用</h2>
+    <div class="grid-form">
+      <div class="field full">
+        <label>品項 / 說明</label>
+        <input type="text" id="sp-item" placeholder="例：難波居酒屋晚餐" />
+      </div>
+      <div class="field">
+        <label>金額</label>
+        <input type="number" id="sp-amount" inputmode="decimal" step="any" placeholder="0" oninput="renderSplitParts()" />
+      </div>
+      <div class="field">
+        <label>幣別</label>
+        <select id="sp-currency" onchange="renderSplitParts()">
+          <option value="JPY">日圓 ¥</option>
+          <option value="TWD">台幣 NT$</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>日期</label>
+        <input type="date" id="sp-date" />
+      </div>
+      <div class="field">
+        <label>誰先付（墊款人）</label>
+        <select id="sp-payer"></select>
+      </div>
+      <div class="field full">
+        <label>分攤方式</label>
+        <div class="seg-mini">
+          <label><input type="radio" name="spmode" value="equal" checked onchange="onSplitModeChange()"><span>均分</span></label>
+          <label><input type="radio" name="spmode" value="amount" onchange="onSplitModeChange()"><span>指定金額</span></label>
+          <label><input type="radio" name="spmode" value="shares" onchange="onSplitModeChange()"><span>比例份數</span></label>
+        </div>
+      </div>
+      <div class="field full">
+        <label id="sp-part-label">分攤者（勾選參與均分的人）</label>
+        <div class="part-list" id="sp-parts"></div>
+        <div class="split-balance" id="sp-balance"></div>
+      </div>
+      <div class="field full">
+        <label>備註（可空白）</label>
+        <input type="text" id="sp-note" placeholder="例：A 請客一杯" />
+      </div>
+    </div>
+    <div class="row-end">
+      <button class="btn btn-ghost" onclick="closeSplitForm()">取消</button>
+      <button class="btn btn-primary" onclick="saveSplitForm()">儲存</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -467,8 +610,328 @@ function defaultData() {
       '門票': ['景點','展覽','樂園'],
       '其他': ['雜費','通訊','小費'],
     },
-    txns: []
+    txns: [],
+    members: [],
+    splits: [],
+    schemaVersion: 2
   };
+}
+
+/* ===================== 分帳核心（純函式；?test=1 終端/瀏覽器自測）===================== */
+const SPLIT_CUR = ['JPY', 'TWD'];
+
+// 該筆換算台幣（用「該筆自己的 rate」，區分幣別；不呼叫使用全域 rate 的 toTWD）
+function splitToCur(x, split, targetCur) {
+  if (split.currency === targetCur) return x;
+  const r = Number(split.rate) || 1; // rate：1 台幣 = r 日圓
+  return targetCur === 'TWD' ? x / r : x * r;
+}
+function splitToTWD(x, split) { return splitToCur(x, split, 'TWD'); }
+// 安全物件（null-proto；只用 Object.keys / in，不呼叫原型方法）
+function cleanMap(obj, memberIds) {
+  const out = Object.create(null);
+  if (obj && typeof obj === 'object') {
+    for (const k of Object.keys(obj)) {
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+      if (memberIds && !memberIds.has(k)) continue;
+      const v = Number(obj[k]);
+      if (Number.isFinite(v) && v >= 0) out[k] = v;
+    }
+  }
+  return out;
+}
+// 單筆：每位參與者「原幣別整數」應分攤，Σ = round(amount)（明細與結算的單一真相源）
+function splitSharesNative(split) {
+  const out = Object.create(null);
+  const amount = Math.round(Number(split.amount) || 0);
+  if (amount <= 0) return out;
+  if (split.mode === 'amount') {
+    const src = split.amounts || {};
+    const ids = Object.keys(src).filter(id => { const v = Number(src[id]); return Number.isFinite(v) && v > 0; });
+    if (ids.length === 0) return out;
+    const raw = ids.map(id => { const v = Number(src[id]); const floor = Math.floor(v); return { id, floor, rem: v - floor }; });
+    let assigned = 0;
+    raw.forEach(r => { out[r.id] = r.floor; assigned += r.floor; });
+    let left = amount - assigned;             // amount=round(總額)；回收餘數 → Σ=round(amount)（修 M1）
+    if (left < 0) left = 0;
+    if (left > ids.length) left = ids.length;  // 壞資料(_needsReview)防明細膨脹；正常資料 left≤人數
+    raw.sort((a, b) => b.rem - a.rem || (a.id < b.id ? -1 : 1)); // 最大餘數法；tie 取 id 小
+    for (let i = 0; i < left; i++) out[raw[i % raw.length].id] += 1;
+    return out;
+  }
+  if (split.mode === 'shares') {
+    const src = split.shares || {};
+    const ids = Object.keys(src).filter(id => { const v = Number(src[id]); return Number.isFinite(v) && v > 0; });
+    const total = ids.reduce((s, id) => s + Number(src[id]), 0);
+    if (total <= 0 || ids.length === 0) return out;
+    const raw = ids.map(id => { const exact = amount * Number(src[id]) / total; const floor = Math.floor(exact); return { id, floor, rem: exact - floor }; });
+    let assigned = 0;
+    raw.forEach(r => { out[r.id] = r.floor; assigned += r.floor; });
+    let left = amount - assigned;
+    raw.sort((a, b) => b.rem - a.rem || (a.id < b.id ? -1 : 1));
+    for (let i = 0; i < left; i++) out[raw[i % raw.length].id] += 1;
+    return out;
+  }
+  const ids = (split.participants || []).slice();
+  if (ids.length === 0) return out;
+  const base = Math.floor(amount / ids.length);
+  let left = amount - base * ids.length;
+  for (const id of ids) out[id] = base;
+  const sorted = ids.slice().sort((a, b) => a < b ? -1 : 1);
+  for (let i = 0; i < left; i++) out[sorted[i]] += 1;
+  return out;
+}
+// 結構不變量驗證（五道：金額>0、幣別、付款人∈成員、模式各自規則）；回傳錯誤陣列（空=通過）
+function validateSplit(split, memberIds) {
+  const errs = [];
+  const amount = Number(split.amount);
+  if (!Number.isFinite(amount) || amount <= 0) errs.push('金額需大於 0');
+  if (!SPLIT_CUR.includes(split.currency)) errs.push('幣別不正確');
+  if (!split.payerId || !memberIds.has(split.payerId)) errs.push('需選擇付款人');
+  if (split.mode === 'equal') {
+    const ps = (split.participants || []).filter(id => memberIds.has(id));
+    if (ps.length < 1) errs.push('至少需勾選一位分攤者');
+  } else if (split.mode === 'amount') {
+    const m = split.amounts || {};
+    let sum = 0, anyPos = false, bad = false;
+    for (const id of Object.keys(m)) {
+      if (!memberIds.has(id)) continue;
+      const v = Number(m[id]);
+      if (!Number.isFinite(v) || v < 0) { bad = true; break; }
+      sum += v; if (v > 0) anyPos = true;
+    }
+    if (bad) errs.push('分攤金額需為非負數');
+    else if (!anyPos) errs.push('至少一人分攤金額需大於 0');
+    else if (Math.round(sum) !== Math.round(amount)) errs.push('各人分攤金額加總需等於總額');
+  } else if (split.mode === 'shares') {
+    const m = split.shares || {};
+    let sum = 0;
+    for (const id of Object.keys(m)) { if (!memberIds.has(id)) continue; const v = Number(m[id]); if (Number.isFinite(v) && v > 0) sum += v; }
+    if (sum <= 0) errs.push('份數總和需大於 0');
+  } else errs.push('分攤方式不正確');
+  return errs;
+}
+// 結算：整數台幣域 + 單一真相源 + payer/needsReview 排除
+function computeSettlement(members, splits, targetCur) {
+  targetCur = (targetCur === 'JPY') ? 'JPY' : 'TWD'; // 結算域＝顯示幣別，避免幣別往返取整誤差
+  const memberIds = new Set(members.map(m => m.id));
+  const paid = Object.create(null), owed = Object.create(null);
+  for (const m of members) { paid[m.id] = 0; owed[m.id] = 0; }
+  let skipped = 0;
+  for (const s of splits) {
+    if (s._needsReview) { skipped++; continue; }
+    if (!s.payerId || !memberIds.has(s.payerId)) { skipped++; continue; }
+    if (s.mode === 'amount') {
+      let sm = 0; const am = s.amounts || {};
+      for (const id of Object.keys(am)) { if (memberIds.has(id)) { const v = Number(am[id]); if (Number.isFinite(v) && v >= 0) sm += v; } }
+      if (Math.round(sm) !== Math.round(Number(s.amount) || 0)) { skipped++; continue; }
+    }
+    const shares = splitSharesNative(s);
+    for (const id of Object.keys(shares)) { if (memberIds.has(id)) owed[id] += splitToCur(shares[id], s, targetCur); }
+    paid[s.payerId] += splitToCur(Math.round(Number(s.amount) || 0), s, targetCur);
+  }
+  const netInt = Object.create(null);
+  let sum = 0;
+  for (const m of members) { netInt[m.id] = Math.round(paid[m.id] - owed[m.id]); sum += netInt[m.id]; }
+  if (sum !== 0) {
+    let target = null;
+    for (const id of Object.keys(netInt)) {
+      if (target === null) { target = id; continue; }
+      const a = Math.abs(netInt[id]), b = Math.abs(netInt[target]);
+      if (a > b || (a === b && id < target)) target = id;
+    }
+    if (target !== null) netInt[target] -= sum;
+  }
+  const debtors = [], creditors = [];
+  for (const id of Object.keys(netInt)) {
+    if (netInt[id] < 0) debtors.push({ id, amt: -netInt[id] });
+    else if (netInt[id] > 0) creditors.push({ id, amt: netInt[id] });
+  }
+  debtors.sort((a, b) => b.amt - a.amt || (a.id < b.id ? -1 : 1));
+  creditors.sort((a, b) => b.amt - a.amt || (a.id < b.id ? -1 : 1));
+  const transfers = [];
+  let di = 0, ci = 0;
+  while (di < debtors.length && ci < creditors.length) {
+    const d = debtors[di], c = creditors[ci];
+    const t = Math.min(d.amt, c.amt);
+    if (t > 0) transfers.push({ from: d.id, to: c.id, amount: t });
+    d.amt -= t; c.amt -= t;
+    if (d.amt === 0) di++;
+    if (c.amt === 0) ci++;
+  }
+  return { netInt, transfers, skipped };
+}
+// 淨化（import 與 load 共用，冪等）：members/splits 型別淨化 + 標記 _needsReview / _rateUnknown
+function normalizeSplitData(d) {
+  const seenM = new Set();
+  d.members = (Array.isArray(d.members) ? d.members : []).map(m => {
+    let id = /^[a-z0-9]+$/i.test((m && m.id) || '') ? m.id : genId();
+    while (seenM.has(id)) id = genId();
+    seenM.add(id);
+    const name = (m && typeof m.name === 'string' && m.name.trim()) ? m.name.trim().slice(0, 40) : '成員';
+    return { id, name };
+  });
+  const memberIds = new Set(d.members.map(m => m.id));
+  const fallbackRate = Number(d.rate) > 0 ? Number(d.rate) : 4.98;
+  const seenS = new Set();
+  d.splits = (Array.isArray(d.splits) ? d.splits : []).map(s => {
+    if (!s || typeof s !== 'object') s = {};
+    let id = /^[a-z0-9]+$/i.test(s.id || '') ? s.id : genId();
+    while (seenS.has(id)) id = genId();
+    seenS.add(id);
+    const currency = SPLIT_CUR.includes(s.currency) ? s.currency : 'JPY';
+    let amount = Number(s.amount); if (!Number.isFinite(amount) || amount < 0) amount = 0;
+    let rate = Number(s.rate), rateUnknown = false;
+    if (!Number.isFinite(rate) || rate <= 0) { rate = fallbackRate; rateUnknown = true; }
+    const mode = ['equal', 'amount', 'shares'].includes(s.mode) ? s.mode : 'equal';
+    const payerId = memberIds.has(s.payerId) ? s.payerId : '';
+    const participants = Array.isArray(s.participants) ? s.participants.filter(id => memberIds.has(id)) : [];
+    const amounts = cleanMap(s.amounts, memberIds);
+    const shares = cleanMap(s.shares, memberIds);
+    const item = (typeof s.item === 'string') ? s.item.slice(0, 80) : '';
+    const note = (typeof s.note === 'string') ? s.note.slice(0, 200) : '';
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(s.date || '') ? s.date : today();
+    const out = { id, date, item, note, payerId, amount, currency, rate, mode, participants, amounts, shares };
+    if (rateUnknown || s._rateUnknown) out._rateUnknown = true; // 保留既有估算標記 → 冪等（編輯該筆才清除）
+    if (validateSplit(out, memberIds).length > 0) out._needsReview = true; // 不臆測：排除結算+明細醒目
+    return out;
+  });
+  return d;
+}
+// ?test=1 自測（與終端 split-core.test.js 同一份 23 案；fail 即顯眼報錯）
+function runSplitSelfTest() {
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (cond, name) => { if (cond) pass++; else { fail++; fails.push(name); } };
+  const M = ids => ids.map(id => ({ id, name: id }));
+  const ids = m => new Set(m.map(x => x.id));
+
+  // 1. equal 除不盡 ¥100/3 → 34,33,33，Σ=100
+  let s = { amount: 100, currency: 'JPY', rate: 0.21, mode: 'equal', participants: ['a', 'b', 'c'] };
+  let sh = splitSharesNative(s);
+  ok(sh.a === 34 && sh.b === 33 && sh.c === 33 && (sh.a + sh.b + sh.c) === 100, 'equal 除不盡 Σ=amount');
+
+  // 2. amount 指定金額
+  s = { amount: 10000, currency: 'JPY', rate: 0.21, mode: 'amount', amounts: { a: 8000, b: 2000 } };
+  sh = splitSharesNative(s);
+  ok(sh.a === 8000 && sh.b === 2000, 'amount 指定金額');
+
+  // 3. shares 份數最大餘數 ¥100 / (1:1:1) → 34,33,33
+  s = { amount: 100, currency: 'JPY', rate: 0.21, mode: 'shares', shares: { a: 1, b: 1, c: 1 } };
+  sh = splitSharesNative(s);
+  ok((sh.a + sh.b + sh.c) === 100 && Math.max(sh.a, sh.b, sh.c) - Math.min(sh.a, sh.b, sh.c) <= 1, 'shares 份數 Σ=amount');
+
+  // 4. payer ∉ participants（payer 不分攤，應收全額）
+  let members = M(['a', 'b']);
+  let splits = [{ id: 'x1', amount: 1000, currency: 'TWD', rate: 0.21, mode: 'equal', participants: ['b'], payerId: 'a' }];
+  let r = computeSettlement(members, splits);
+  ok(r.netInt.a === 1000 && r.netInt.b === -1000, 'payer∉participants 應收全額');
+  ok(r.transfers.length === 1 && r.transfers[0].from === 'b' && r.transfers[0].to === 'a' && r.transfers[0].amount === 1000, 'payer∉participants 轉帳正確');
+
+  // 5. 2 人結算（A 付住宿 ¥30000 均分；B 付機票 NT$16000 均分；rate 0.21）
+  members = M(['a', 'b']);
+  splits = [
+    { id: 'h', amount: 30000, currency: 'JPY', rate: 0.21, mode: 'equal', participants: ['a', 'b'], payerId: 'a' },
+    { id: 'f', amount: 16000, currency: 'TWD', rate: 0.21, mode: 'equal', participants: ['a', 'b'], payerId: 'b' },
+  ];
+  r = computeSettlement(members, splits);
+  ok(r.netInt.a + r.netInt.b === 0, '2人 淨額和=0');
+
+  // 6. 3 人 + 淨額和=0 + 不變量（每人 Σ收-Σ付 = netInt）
+  members = M(['a', 'b', 'c']);
+  splits = [
+    { id: '1', amount: 9000, currency: 'JPY', rate: 0.2, mode: 'equal', participants: ['a', 'b', 'c'], payerId: 'a' },
+    { id: '2', amount: 3000, currency: 'TWD', rate: 0.2, mode: 'amount', amounts: { a: 1000, b: 1000, c: 1000 }, payerId: 'b' },
+    { id: '3', amount: 600, currency: 'JPY', rate: 0.2, mode: 'shares', shares: { a: 1, b: 2, c: 3 }, payerId: 'c' },
+  ];
+  r = computeSettlement(members, splits);
+  let netSum = members.reduce((acc, m) => acc + r.netInt[m.id], 0);
+  ok(netSum === 0, '3人 淨額和=0');
+  const back = Object.create(null);
+  members.forEach(m => back[m.id] = 0);
+  r.transfers.forEach(t => { back[t.to] += t.amount; back[t.from] -= t.amount; });
+  let invOK = members.every(m => back[m.id] === r.netInt[m.id]);
+  ok(invOK, '3人 不變量 Σ收-Σ付=netInt');
+  ok(r.transfers.every(t => Number.isInteger(t.amount) && t.amount > 0), '3人 轉帳皆正整數');
+
+  // 7. 差1元案例：混幣別、奇數金額（驗不變量持守 + 整數）
+  members = M(['a', 'b', 'c']);
+  splits = [{ id: 'z', amount: 100, currency: 'JPY', rate: 0.21, mode: 'equal', participants: ['a', 'b', 'c'], payerId: 'a' }];
+  r = computeSettlement(members, splits);
+  netSum = members.reduce((acc, m) => acc + r.netInt[m.id], 0);
+  const back2 = Object.create(null); members.forEach(m => back2[m.id] = 0);
+  r.transfers.forEach(t => { back2[t.to] += t.amount; back2[t.from] -= t.amount; });
+  ok(netSum === 0 && members.every(m => back2[m.id] === r.netInt[m.id]), '差1元 不變量持守');
+
+  // 8. 明細↔結算同源：每筆 Σowed(台幣) === paid(台幣)
+  s = { id: 'k', amount: 777, currency: 'JPY', rate: 0.213, mode: 'shares', shares: { a: 2, b: 1 }, payerId: 'a' };
+  sh = splitSharesNative(s);
+  let sumNative = Object.values(sh).reduce((x, y) => x + y, 0);
+  ok(sumNative === 777, '同源：ΣshareNative=amount');
+  let sumOwedTWD = Object.keys(sh).reduce((x, id) => x + splitToTWD(sh[id], s), 0);
+  let paidTWD = splitToTWD(777, s);
+  ok(Math.abs(sumOwedTWD - paidTWD) < 1e-9, '同源：Σowed台幣=paid台幣');
+
+  // 9. 匯入 Σamounts≠amount → validateSplit 攔 + needsReview 排除
+  members = M(['a', 'b']);
+  let badSplit = { id: 'bad', amount: 10000, currency: 'JPY', rate: 0.21, mode: 'amount', amounts: { a: 8000, b: 1000 }, payerId: 'a' };
+  let errs = validateSplit(badSplit, ids(members));
+  ok(errs.length > 0, '匯入 Σ≠amount 被 validateSplit 攔');
+  r = computeSettlement(members, [badSplit]);
+  ok(r.skipped === 1 && r.netInt.a === 0 && r.netInt.b === 0, '匯入 Σ≠amount compute 端排除不漏錢');
+
+  // 10. payerId 缺失 → 排除
+  members = M(['a', 'b']);
+  splits = [{ id: 'np', amount: 1000, currency: 'TWD', rate: 0.21, mode: 'equal', participants: ['a', 'b'], payerId: 'ghost' }];
+  r = computeSettlement(members, splits);
+  ok(r.skipped === 1 && r.netInt.a === 0 && r.netInt.b === 0, '缺付款人排除');
+
+  // 11. amount=Infinity / "1e400" → 攔
+  errs = validateSplit({ amount: Infinity, currency: 'JPY', rate: 0.21, mode: 'equal', participants: ['a'], payerId: 'a' }, ids(M(['a'])));
+  ok(errs.some(e => e.includes('金額')), 'Infinity 金額被攔');
+  ok(!Number.isFinite(Number('1e400')), '1e400→Infinity 被 isFinite 偵測');
+
+  // 12. __proto__ 注入 → cleanMap 剔除
+  let poison = JSON.parse('{"__proto__":{"x":1},"a":50,"b":50}');
+  let cleaned = cleanMap(poison, new Set(['a', 'b']));
+  ok(!('__proto__' in cleaned) || cleaned.__proto__ === undefined, 'cleanMap 剔除 __proto__');
+  ok(Object.keys(cleaned).length === 2 && cleaned.a === 50 && cleaned.b === 50, 'cleanMap 保留合法鍵');
+  ok(({}).x === undefined, '__proto__ 未污染全域原型');
+
+  // 13. 退化：全員淨額 0
+  members = M(['a', 'b']);
+  splits = [{ id: 'e', amount: 1000, currency: 'TWD', rate: 0.21, mode: 'equal', participants: ['a', 'b'], payerId: 'a' },
+            { id: 'e2', amount: 1000, currency: 'TWD', rate: 0.21, mode: 'equal', participants: ['a', 'b'], payerId: 'b' }];
+  r = computeSettlement(members, splits);
+  ok(r.netInt.a === 0 && r.netInt.b === 0 && r.transfers.length === 0, '退化：全員淨額0 無轉帳');
+
+  // 14. 退化：所有 split 都被排除（全缺 payer）
+  members = M(['a', 'b']);
+  splits = [{ id: 'g', amount: 500, currency: 'TWD', rate: 0.21, mode: 'equal', participants: ['a', 'b'], payerId: '' }];
+  r = computeSettlement(members, splits);
+  ok(r.skipped === 1 && r.transfers.length === 0, '退化：全排除 無轉帳');
+
+  // 15. 退化：非成員 key（participants 含 ghost）compute 過濾
+  members = M(['a', 'b']);
+  splits = [{ id: 'q', amount: 300, currency: 'TWD', rate: 0.21, mode: 'amount', amounts: { a: 100, b: 100, ghost: 100 }, payerId: 'a' }];
+  errs = validateSplit(splits[0], ids(members));
+  ok(errs.length > 0, '非成員 key 致 Σ≠amount 被攔');
+
+  // 16. targetCur 結算域：純日幣 ¥1000 均分 2 人 → JPY域±500（修正台幣往返取整的498）
+  members = M(['a', 'b']);
+  splits = [{ id: 'jc', amount: 1000, currency: 'JPY', rate: 4.98, mode: 'equal', participants: ['a', 'b'], payerId: 'a' }];
+  r = computeSettlement(members, splits, 'JPY');
+  ok(r.netInt.a === 500 && r.netInt.b === -500, '純日幣 JPY域 net=±500（非498）');
+  ok(r.transfers.length === 1 && r.transfers[0].amount === 500, '純日幣 JPY域 轉帳¥500');
+  r = computeSettlement(members, splits, 'TWD');
+  ok(r.netInt.a === 100 && r.netInt.b === -100, '純日幣 TWD域 net=±100');
+
+  // 17. amount 模式小數：33.33/33.33/33.34 → 最大餘數回收，Σ=round(amount)（修 M1）
+  s = { amount: 100, currency: 'TWD', rate: 4.98, mode: 'amount', amounts: { a: 33.33, b: 33.33, c: 33.34 } };
+  sh = splitSharesNative(s);
+  ok((sh.a + sh.b + sh.c) === 100, 'amount 小數 Σ=round(amount)（修 M1，非 99）');
+  ok(sh.a === 33 && sh.b === 33 && sh.c === 34, 'amount 小數餘數補給小數最大者 c=33.34');
+
+  return { pass, fail, fails };
 }
 
 let data = load();
@@ -490,6 +953,10 @@ function load() {
     if (d.rateSource === undefined) d.rateSource = '手動設定';
     if (d.rateUpdatedAt === undefined) d.rateUpdatedAt = null;
     if (typeof d.ledgerName !== 'string' || !d.ledgerName.trim()) d.ledgerName = def.ledgerName;
+    if (!Array.isArray(d.members)) d.members = [];
+    if (!Array.isArray(d.splits)) d.splits = [];
+    normalizeSplitData(d);          // 必修B：load 路徑也走同一份淨化（冪等）
+    d.schemaVersion = 2;            // 缺欄位視為 1，正規化後才標 2
     return d;
   } catch (e) {
     console.error('讀取失敗，使用預設值', e);
@@ -498,7 +965,7 @@ function load() {
 }
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
-  catch (e) { alert('儲存失敗：' + e.message); }
+  catch (e) { toast('儲存失敗，可能空間不足：' + e.message); }
 }
 
 /* ===================== 計算 ===================== */
@@ -592,6 +1059,7 @@ function render() {
   renderChart();
   renderDateStrip();
   renderTxns();
+  renderSplit();
 }
 
 function renderTitle() {
@@ -1355,6 +1823,7 @@ function openSettings() {
   document.getElementById('s-rate').value = data.rate;
   document.getElementById('s-cats').value = serializeCats(data.categories);
   renderAcctEditor();
+  document.getElementById('s-split-enabled').checked = splitEnabled();
   document.getElementById('settings-modal').classList.add('show');
 }
 function closeSettings() { document.getElementById('settings-modal').classList.remove('show'); }
@@ -1419,6 +1888,7 @@ function saveSettings() {
   if (r > 0 && r !== data.rate) { data.rate = r; data.rateSource = '手動設定'; data.rateUpdatedAt = nowStr(); }
   const cats = parseCats(document.getElementById('s-cats').value);
   if (Object.keys(cats).length) data.categories = cats;
+  try { localStorage.setItem('jp_split_enabled', document.getElementById('s-split-enabled').checked ? '1' : '0'); } catch (e) {}
   save(); refreshSelects(); render(); closeSettings();
   toast('設定已儲存 ✅');
 }
@@ -1461,6 +1931,10 @@ function sanitizeImport(d) {
       toAmount: t.toAmount != null ? (Number(t.toAmount) || 0) : t.toAmount,
       date: /^\d{4}-\d{2}-\d{2}$/.test(t.date || '') ? t.date : today() };
   });
+  if (!Array.isArray(d.members)) d.members = [];
+  if (!Array.isArray(d.splits)) d.splits = [];
+  normalizeSplitData(d);          // 必修B：分帳資料同步淨化（標 _needsReview / _rateUnknown）
+  d.schemaVersion = 2;
   return d;
 }
 function importJSON(e) {
@@ -1477,6 +1951,7 @@ function importJSON(e) {
       catch (err) { if (!confirm('⚠️ 自動備份目前資料失敗（可能空間不足）。\n繼續匯入將無法自動還原舊資料，建議先手動「匯出備份」。\n仍要繼續匯入嗎？')) return; }
       data = sanitizeImport(d);
       if (!data.categories) data.categories = defaultData().categories;
+      clearSplitUndo(); // N1-a：換資料集前清分帳 undo 緩衝，杜絕舊 split 注入新帳本
       save(); refreshSelects(); render(); closeSettings();
       alert('匯入成功 ✅\n（如需復原，請到「⚙️設定 → ♻️還原上次自動備份」）');
     } catch (err) { alert('匯入失敗：' + err.message); }
@@ -1493,6 +1968,7 @@ function restoreAutobak() {
   if (!confirm('還原會用「上次匯入前的自動備份」覆蓋目前資料。\n（目前資料會被存成新的自動備份，可再按一次還原切回。）\n確定還原？')) return;
   const cur = JSON.stringify(data); // 還原前先留存目前資料，讓還原可逆
   data = sanitizeImport(d);
+  clearSplitUndo(); // N1-a：還原前清分帳 undo 緩衝
   if (!data.categories) data.categories = defaultData().categories;
   try { localStorage.setItem('jp_trip_ledger_v2_autobak', cur); } catch (e) {}
   save(); refreshSelects(); render(); closeSettings();
@@ -1517,7 +1993,7 @@ function exportCSV() {
 function clearAll() {
   if (!confirm('⚠️ 這會清除所有記錄與設定，回到初始狀態。建議先匯出備份。確定清除？')) return;
   if (!confirm('再次確認：真的要清除全部嗎？')) return;
-  data = defaultData(); save(); refreshSelects(); render(); closeSettings();
+  data = defaultData(); clearSplitUndo(); save(); refreshSelects(); render(); closeSettings();
 }
 
 /* ===================== 工具 ===================== */
@@ -1591,12 +2067,397 @@ function enableDragScroll(id) {
 enableDragScroll('date-strip');
 enableDragScroll('sort-strip');
 
+/* ===================== 分帳 UI（多人分攤）===================== */
+let settleCur = 'TWD';
+let splitEditingId = null;
+let _spDraft = { amounts: Object.create(null), shares: Object.create(null), participants: [] };
+let _splitUndo = null, _splitUndoTimer = null;
+
+function memberName(id) {
+  const m = data.members.find(x => x.id === id);
+  return m ? m.name : '（已刪成員）';
+}
+// 把「台幣整數」依顯示幣別呈現（結算用：JPY 以目前全域匯率回估）
+function fmtCur(amt, cur) {
+  return (cur === 'TWD' ? 'NT$' : '¥') + Math.round(amt).toLocaleString('en-US');
+}
+
+/* —— 收合 —— */
+function toggleSplit() {
+  const c = document.getElementById('split-card');
+  const collapsed = c.classList.toggle('split-collapsed');
+  try { localStorage.setItem('jp_split_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+}
+function applySplitCollapsed() {
+  let collapsed = false; // 新使用者預設展開
+  try { const v = localStorage.getItem('jp_split_collapsed'); if (v !== null) collapsed = v === '1'; } catch (e) {}
+  const c = document.getElementById('split-card');
+  if (c) c.classList.toggle('split-collapsed', collapsed);
+}
+function splitEnabled() {
+  try { const v = localStorage.getItem('jp_split_enabled'); return v === null ? false : v === '1'; } catch (e) { return false; }
+}
+function applySplitEnabled() {
+  const c = document.getElementById('split-card');
+  if (c) c.classList.toggle('split-hidden', !splitEnabled());
+}
+function setSettleCur(cur) { settleCur = (cur === 'JPY') ? 'JPY' : 'TWD'; renderSettle(); }
+
+/* —— 主渲染 —— */
+function renderSplit() {
+  renderSplitMembers();
+  renderSplitList();
+  renderSettle();
+  applySplitCollapsed();
+  applySplitEnabled();
+}
+
+/* —— 成員 —— */
+function renderSplitMembers() {
+  const el = document.getElementById('split-members');
+  if (!el) return;
+  const chips = data.members.map(m =>
+    `<span class="mbr-chip"><input class="nm-input" value="${escapeHtml(m.name)}" maxlength="40" ` +
+    `onchange="renameMember('${m.id}', this.value)" onkeydown="if(event.key==='Enter')this.blur()" />` +
+    `<span class="del" onclick="removeMember('${m.id}')" title="移除">✕</span></span>`
+  ).join('');
+  el.innerHTML = chips +
+    `<span class="mbr-chip mbr-new"><input id="new-member-name" class="nm-input" placeholder="輸入名字新增" maxlength="40" ` +
+    `onkeydown="if(event.key==='Enter')addMember()" /><span class="del mbr-addbtn" onclick="addMember()" title="新增成員">＋</span></span>`;
+}
+function addMember() {
+  const input = document.getElementById('new-member-name');
+  const name = input ? (input.value || '').trim() : '';
+  if (!name) { if (input) input.focus(); return; }
+  data.members.push({ id: genId(), name: name.slice(0, 40) });
+  save(); render(); refreshSplitPayer();
+  const ni = document.getElementById('new-member-name'); if (ni) ni.focus();
+}
+function renameMember(id, val) {
+  const m = data.members.find(x => x.id === id);
+  if (!m) return;
+  const name = (val || '').trim();
+  if (!name || name === m.name) { render(); return; }
+  m.name = name.slice(0, 40);
+  save(); render(); refreshSplitPayer();
+}
+function removeMember(id) {
+  const m = data.members.find(x => x.id === id);
+  if (!m) return;
+  // 擋刪：四處引用（payerId / participants / amounts / shares），同一筆最多算一次
+  let refs = 0;
+  for (const s of data.splits) {
+    if (s.payerId === id) refs++;
+    else if (Array.isArray(s.participants) && s.participants.includes(id)) refs++;
+    else if (s.amounts && (id in s.amounts)) refs++;
+    else if (s.shares && (id in s.shares)) refs++;
+  }
+  if (refs > 0) { toast(`「${m.name}」被 ${refs} 筆分帳引用，請先刪除或改那些費用再移除`); return; }
+  data.members = data.members.filter(x => x.id !== id);
+  save(); render(); refreshSplitPayer();
+}
+
+/* —— 明細 —— */
+function splitSummary(s) {
+  const payer = s.payerId ? memberName(s.payerId) : '（未指定付款人）';
+  const modeTxt = s.mode === 'amount' ? '指定金額' : (s.mode === 'shares' ? '比例份數' : '均分');
+  return `${payer} 先付 · ${modeTxt}`;
+}
+// §E 同源：用 splitSharesNative 顯示每人「原幣別整數」應分攤
+function sharesLineHTML(s) {
+  const sh = splitSharesNative(s);
+  const ids = Object.keys(sh);
+  if (ids.length === 0) return '';
+  const sym = s.currency === 'TWD' ? 'NT$' : '¥';
+  return ids.map(id => `${escapeHtml(memberName(id))} ${sym}${Math.round(sh[id]).toLocaleString('en-US')}`).join('　');
+}
+function renderSplitList() {
+  const el = document.getElementById('split-list');
+  if (!el) return;
+  const undoBar = _splitUndo ? `<div class="split-undo"><span>已刪除「${escapeHtml(_splitUndo.item || '未命名費用')}」</span><button class="btn btn-sm" onclick="undoDelSplit()">↩ 復原</button></div>` : '';
+  if (!data.splits.length) {
+    el.innerHTML = undoBar + '<div class="split-empty">還沒有分帳費用。先在上方新增同行成員，再按「＋ 新增分帳費用」。</div>';
+    return;
+  }
+  const list = [...data.splits].sort((a, b) => (a.date < b.date ? 1 : (a.date > b.date ? -1 : 0)));
+  el.innerHTML = undoBar + list.map(s => {
+    const sym = s.currency === 'TWD' ? 'NT$' : '¥';
+    const amt = Math.round(Number(s.amount) || 0);
+    const twd = Math.round(splitToTWD(amt, s));
+    const tags = [];
+    if (s._needsReview) tags.push('<span class="review-tag">需檢查</span>');
+    if (!s.payerId) tags.push('<span class="warn-tag">缺付款人</span>');
+    if (s._rateUnknown) tags.push('<span class="warn-tag">匯率估算</span>');
+    const sl = sharesLineHTML(s);
+    return `<div class="split-item${s._needsReview ? ' review' : ''}">` +
+      `<div class="mid">` +
+        `<div class="desc">${escapeHtml(s.item || '（未命名費用）')} ${tags.join(' ')}</div>` +
+        `<div class="meta"><span>${escapeHtml(s.date)}</span><span>·</span><span>${escapeHtml(splitSummary(s))}</span>` +
+          (s.note ? '<span>·</span><span>' + escapeHtml(s.note) + '</span>' : '') + `</div>` +
+        (sl ? `<div class="shares-line">${sl}</div>` : '') +
+      `</div>` +
+      `<div class="amt"><div class="v">${sym}${amt.toLocaleString('en-US')}</div>` +
+        (s.currency === 'JPY' ? `<div class="twd">≒NT$${twd.toLocaleString('en-US')}</div>` : '') + `</div>` +
+      `<div class="ops">` +
+        `<button class="btn btn-sm" onclick="editSplit('${s.id}')">✎</button>` +
+        `<button class="btn btn-sm btn-danger" onclick="delSplit('${s.id}')">🗑</button>` +
+      `</div>` +
+    `</div>`;
+  }).join('');
+}
+function delSplit(id) {
+  const idx = data.splits.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  _splitUndo = data.splits[idx];
+  data.splits.splice(idx, 1);
+  save(); render();
+  toast('已刪除分帳費用');
+  clearTimeout(_splitUndoTimer);
+  _splitUndoTimer = setTimeout(() => { _splitUndo = null; renderSplitList(); }, 8000);
+}
+function clearSplitUndo() { _splitUndo = null; clearTimeout(_splitUndoTimer); }
+function undoDelSplit() {
+  if (!_splitUndo) return;
+  data.splits.push(_splitUndo);
+  clearSplitUndo();
+  normalizeSplitData(data); // 還原筆若引用已刪成員 → 清 payerId、標 _needsReview 並排除結算（N1-b）
+  save(); render();
+  toast('已復原分帳費用');
+}
+
+/* —— 結算 —— */
+function renderSettle() {
+  const el = document.getElementById('settle-box');
+  if (!el) return;
+  if (data.members.length < 2) {
+    el.innerHTML = '<div class="split-empty">需要至少 2 位同行成員才能計算誰欠誰。</div>';
+    return;
+  }
+  const r = computeSettlement(data.members, data.splits, settleCur);
+  const allZero = data.members.every(m => (r.netInt[m.id] || 0) === 0);
+  let html = '';
+  if (!r.transfers.length) {
+    html += allZero
+      ? '<div class="split-empty">目前無人需要轉帳（帳已平）。</div>'
+      : '<div class="split-empty">尚無可結算的分帳費用。</div>';
+  } else {
+    html += '<div class="settle-box">';
+    html += r.transfers.map(t =>
+      `<div class="settle-row"><span class="pay">${escapeHtml(memberName(t.from))}</span>` +
+      `<span class="arrow">→</span><span class="pay">${escapeHtml(memberName(t.to))}</span>` +
+      `<span class="sum">${fmtCur(t.amount, settleCur)}</span></div>`
+    ).join('');
+    const nets = data.members.map(m => {
+      const v = r.netInt[m.id] || 0;
+      const cls = v > 0 ? 'pos' : (v < 0 ? 'neg' : '');
+      const txt = v > 0 ? ('應收 ' + fmtCur(v, settleCur)) : (v < 0 ? ('應付 ' + fmtCur(-v, settleCur)) : '已平');
+      return `<span class="${cls}">${escapeHtml(m.name)}：${txt}</span>`;
+    }).join('　');
+    html += `<div class="settle-net">${nets}</div></div>`;
+  }
+  html += '<div class="settle-note">※ 每筆費用採「建立當下的匯率」換算台幣域結算；日幣金額為依目前匯率回估。</div>';
+  if (r.skipped > 0) html += `<div class="settle-note">⚠️ 有 ${r.skipped} 筆費用因缺付款人或資料異常未納入結算（請檢查標「需檢查／缺付款人」的明細）。</div>`;
+  el.innerHTML = html;
+}
+
+/* —— 費用表單（新增/編輯）—— */
+function refreshSplitPayer() {
+  const sel = document.getElementById('sp-payer');
+  if (!sel) return;
+  const cur = sel.value;
+  const opts = data.members.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`).join('');
+  sel.innerHTML = opts || '<option value="">（請先新增成員）</option>';
+  if (cur && data.members.some(m => m.id === cur)) sel.value = cur;
+}
+function getSpMode() {
+  const r = document.querySelector('input[name="spmode"]:checked');
+  return r ? r.value : 'equal';
+}
+function openSplitForm() {
+  if (data.members.length < 1) { toast('請先在上方「同行成員」新增至少一位成員'); return; }
+  splitEditingId = null;
+  _spDraft = { amounts: Object.create(null), shares: Object.create(null), participants: data.members.map(m => m.id) };
+  document.getElementById('split-modal-title').textContent = '新增分帳費用';
+  document.getElementById('sp-item').value = '';
+  document.getElementById('sp-amount').value = '';
+  document.getElementById('sp-currency').value = 'JPY';
+  document.getElementById('sp-date').value = today();
+  document.getElementById('sp-note').value = '';
+  document.querySelector('input[name="spmode"][value="equal"]').checked = true;
+  refreshSplitPayer();
+  if (data.members.length) document.getElementById('sp-payer').selectedIndex = 0;
+  onSplitModeChange();
+  document.getElementById('split-modal').classList.add('show');
+}
+function editSplit(id) {
+  const s = data.splits.find(x => x.id === id);
+  if (!s) return;
+  splitEditingId = id;
+  _spDraft = {
+    amounts: Object.assign(Object.create(null), s.amounts || {}),
+    shares: Object.assign(Object.create(null), s.shares || {}),
+    participants: Array.isArray(s.participants) ? s.participants.slice() : []
+  };
+  document.getElementById('split-modal-title').textContent = '編輯分帳費用';
+  document.getElementById('sp-item').value = s.item || '';
+  document.getElementById('sp-amount').value = s.amount || '';
+  document.getElementById('sp-currency').value = s.currency || 'JPY';
+  document.getElementById('sp-date').value = s.date || today();
+  document.getElementById('sp-note').value = s.note || '';
+  document.querySelector(`input[name="spmode"][value="${s.mode || 'equal'}"]`).checked = true;
+  refreshSplitPayer();
+  document.getElementById('sp-payer').value = s.payerId || '';
+  onSplitModeChange();
+  document.getElementById('split-modal').classList.add('show');
+}
+function closeSplitForm() { document.getElementById('split-modal').classList.remove('show'); }
+function onSplitModeChange() {
+  const mode = getSpMode();
+  const label = document.getElementById('sp-part-label');
+  if (label) label.textContent = mode === 'equal' ? '分攤者（勾選參與均分的人）'
+    : (mode === 'amount' ? '各人分攤金額（依該筆幣別）' : '各人份數（比例）');
+  renderSplitParts();
+}
+function renderSplitParts() {
+  const box = document.getElementById('sp-parts');
+  if (!box) return;
+  const mode = getSpMode();
+  if (!data.members.length) { box.innerHTML = '<div class="split-empty">尚無成員</div>'; updateSplitBalance(); return; }
+  box.innerHTML = data.members.map(m => {
+    const nm = escapeHtml(m.name);
+    if (mode === 'equal') {
+      const on = _spDraft.participants.includes(m.id);
+      return `<div class="part-row"><label class="chk2"><input type="checkbox" ${on ? 'checked' : ''} onchange="onPartToggle('${m.id}')"> ${nm}</label><span class="pp" id="pp-${m.id}"></span></div>`;
+    }
+    if (mode === 'amount') {
+      const v = (m.id in _spDraft.amounts) ? _spDraft.amounts[m.id] : '';
+      return `<div class="part-row"><span class="pn">${nm}</span><input type="number" inputmode="decimal" step="any" value="${v}" placeholder="0" oninput="onAmtInput('${m.id}', this.value)"></div>`;
+    }
+    const v = (m.id in _spDraft.shares) ? _spDraft.shares[m.id] : '';
+    return `<div class="part-row"><span class="pn">${nm}</span><input type="number" inputmode="decimal" step="any" value="${v}" placeholder="0" oninput="onShareInput('${m.id}', this.value)"><span class="pp" id="pp-${m.id}"></span></div>`;
+  }).join('');
+  updateSplitBalance();
+}
+function onPartToggle(id) {
+  const i = _spDraft.participants.indexOf(id);
+  if (i >= 0) _spDraft.participants.splice(i, 1); else _spDraft.participants.push(id);
+  updateSplitBalance();
+}
+function onAmtInput(id, val) {
+  const v = Number(val);
+  if (val === '' || !Number.isFinite(v)) delete _spDraft.amounts[id];
+  else _spDraft.amounts[id] = v;
+  updateSplitBalance();
+}
+function onShareInput(id, val) {
+  const v = Number(val);
+  if (val === '' || !Number.isFinite(v)) delete _spDraft.shares[id];
+  else _spDraft.shares[id] = v;
+  updateSplitBalance();
+}
+// 即時草稿（供預覽與差額驗證；金額/幣別讀 DOM、分攤讀 _spDraft）
+function buildDraftSplit() {
+  return {
+    amount: Number(document.getElementById('sp-amount').value),
+    currency: document.getElementById('sp-currency').value === 'TWD' ? 'TWD' : 'JPY',
+    mode: getSpMode(),
+    rate: Number(data.rate) || 1,
+    payerId: document.getElementById('sp-payer').value || '',
+    participants: _spDraft.participants.slice(),
+    amounts: _spDraft.amounts,
+    shares: _spDraft.shares
+  };
+}
+function updateSplitBalance() {
+  const bal = document.getElementById('sp-balance');
+  if (!bal) return;
+  const mode = getSpMode();
+  const amount = Math.round(Number(document.getElementById('sp-amount').value) || 0);
+  const cur = document.getElementById('sp-currency').value === 'TWD' ? 'TWD' : 'JPY';
+  const sym = cur === 'TWD' ? 'NT$' : '¥';
+  // 每人即時預覽
+  const sh = (amount > 0) ? splitSharesNative(buildDraftSplit()) : Object.create(null);
+  data.members.forEach(m => {
+    const pp = document.getElementById('pp-' + m.id);
+    if (pp) pp.textContent = (m.id in sh) ? (sym + Math.round(sh[m.id]).toLocaleString('en-US')) : '';
+  });
+  if (mode === 'amount') {
+    let sum = 0; for (const k of Object.keys(_spDraft.amounts)) { const v = Number(_spDraft.amounts[k]); if (Number.isFinite(v) && v > 0) sum += v; }
+    const diff = Math.round(amount - sum);
+    if (!amount) { bal.className = 'split-balance'; bal.textContent = ''; }
+    else if (diff === 0) { bal.className = 'split-balance ok'; bal.textContent = `✓ 已分配 ${sym}${Math.round(sum).toLocaleString('en-US')}，與總額相符`; }
+    else { bal.className = 'split-balance bad'; bal.textContent = diff > 0 ? `還差 ${sym}${diff.toLocaleString('en-US')} 未分配` : `超出 ${sym}${(-diff).toLocaleString('en-US')}`; }
+  } else if (mode === 'shares') {
+    let sum = 0; for (const k of Object.keys(_spDraft.shares)) { const v = Number(_spDraft.shares[k]); if (Number.isFinite(v) && v > 0) sum += v; }
+    bal.className = sum > 0 ? 'split-balance ok' : 'split-balance bad';
+    bal.textContent = sum > 0 ? `總份數 ${sum}` : '請至少給一人份數';
+  } else {
+    const n = _spDraft.participants.length;
+    bal.className = n > 0 ? 'split-balance ok' : 'split-balance bad';
+    bal.textContent = n > 0 ? `${n} 人均分` : '請至少勾選一位分攤者';
+  }
+}
+function saveSplitForm() {
+  const amount = Number(document.getElementById('sp-amount').value);
+  const currency = document.getElementById('sp-currency').value === 'TWD' ? 'TWD' : 'JPY';
+  const mode = getSpMode();
+  const payerId = document.getElementById('sp-payer').value || '';
+  const item = document.getElementById('sp-item').value.trim();
+  const note = document.getElementById('sp-note').value.trim();
+  const date = document.getElementById('sp-date').value || today();
+  const memberIds = new Set(data.members.map(m => m.id));
+
+  // §D 匯率快照：新增=現值；編輯且幣別不變且原為明確匯率=保留；估算(_rateUnknown)或改幣別=重新快照當下匯率
+  let rate = Number(data.rate) || 1;
+  let old = null;
+  if (splitEditingId) {
+    old = data.splits.find(x => x.id === splitEditingId);
+    if (old && old.currency === currency && Number(old.rate) > 0 && !old._rateUnknown) rate = Number(old.rate);
+  }
+
+  const candidate = {
+    id: splitEditingId || genId(),
+    date, item, note, payerId, amount, currency, rate, mode,
+    participants: (mode === 'equal') ? _spDraft.participants.filter(id => memberIds.has(id)) : [],
+    amounts: (mode === 'amount') ? cleanMap(_spDraft.amounts, memberIds) : Object.create(null),
+    shares: (mode === 'shares') ? cleanMap(_spDraft.shares, memberIds) : Object.create(null)
+  };
+
+  // §C 五道擋存閘
+  const errs = validateSplit(candidate, memberIds);
+  if (errs.length) { toast('無法儲存：\n• ' + errs.join('\n• ')); return; }
+
+  if (splitEditingId && old) {
+    const idx = data.splits.findIndex(x => x.id === splitEditingId);
+    data.splits[idx] = candidate;
+    toast('已儲存修改 ✅');
+  } else {
+    data.splits.push(candidate);
+    toast('已新增分帳費用 ✅');
+  }
+  save(); closeSplitForm(); render();
+}
+
+/* 分帳 modal：點背景 / Esc 關閉 */
+document.getElementById('split-modal').addEventListener('click', e => { if (e.target.id === 'split-modal') closeSplitForm(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('split-modal').classList.contains('show')) closeSplitForm(); });
+
 /* ===================== 啟動 ===================== */
 document.getElementById('f-date').value = today();
 refreshSelects();
 onTypeChange();
 render();
 applyFormCollapsed();
+refreshSplitPayer();
+
+/* ?test=1：分帳核心自測硬 gate（與終端 split-core.test.js 同一份 23 案）*/
+try {
+  if (location.search.indexOf('test=1') >= 0) {
+    const tr = runSplitSelfTest();
+    if (tr.fail > 0) { console.error('分帳自測 FAIL', tr.fails); toast('⚠️ 分帳自測失敗：\n' + tr.fails.join('\n')); }
+    else { console.log('分帳自測 PASS ' + tr.pass + ' / FAIL 0'); toast('✅ 分帳自測全數通過（' + tr.pass + ' 案）'); }
+  }
+} catch (e) { console.error(e); }
 
 /* Service Worker：離線可用（僅 https/http 註冊；file:// 本機雙擊不註冊以免報錯）*/
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.protocol === 'http:')) {
