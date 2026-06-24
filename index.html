@@ -1609,7 +1609,7 @@ function submitForm(event) {
   const date = document.getElementById('f-date').value || today();
   const amount = Number(document.getElementById('f-amount').value);
   const note = document.getElementById('f-note').value.trim();
-  if (!amount || amount <= 0) { alert('請輸入大於 0 的金額'); return false; }
+  if (!amount || amount <= 0) { toast('請輸入大於 0 的金額'); return false; }
 
   let txn;
   if (type === 'expense') {
@@ -1617,18 +1617,18 @@ function submitForm(event) {
     const item = document.getElementById('f-item').value.trim();
     const cat = document.getElementById('f-cat').value;
     const subcat = document.getElementById('f-subcat').value.trim();
-    if (!account) { alert('請選擇支付帳戶'); return false; }
-    if (!item) { alert('請輸入消費品項/名稱'); document.getElementById('f-item').focus(); return false; }
+    if (!account) { toast('請選擇支付帳戶'); return false; }
+    if (!item) { toast('請輸入消費品項/名稱'); document.getElementById('f-item').focus(); return false; }
     txn = { type: 'expense', date, account, cat, subcat, item, amount, note };
   } else {
     const from = document.getElementById('f-from').value;
     const to = document.getElementById('f-to').value;
-    if (from === to) { alert('「從」和「到」不能是同一個帳戶'); return false; }
+    if (from === to) { toast('「從」和「到」不能是同一個帳戶'); return false; }
     const fa = acctById(from), ta = acctById(to);
     let toAmount = amount;
     if (fa && ta && fa.currency !== ta.currency) {
       toAmount = Number(document.getElementById('f-toamount').value) || 0;
-      if (toAmount <= 0) { alert('請輸入實際入帳金額'); return false; }
+      if (toAmount <= 0) { toast('請輸入實際入帳金額'); return false; }
     }
     txn = { type: 'topup', date, from, to, amount, toAmount, note };
   }
@@ -1789,8 +1789,7 @@ async function updateRate() {
         data.rateSource = '台灣銀行現金賣出';
         data.rateUpdatedAt = nowStr();
         save(); render();
-        toast('匯率已更新 ✅');
-        alert(`已更新：台灣銀行現金賣出\n¥100 = NT$${(cashSell * 100).toFixed(2)}\n1 元台幣 ≒ ¥${data.rate}`);
+        toast('匯率已更新：台銀現金賣出，1 元台幣 ≒ ¥' + data.rate);
         return;
       }
     }
@@ -1805,12 +1804,12 @@ async function updateRate() {
         data.rateSource = '參考中價（非現金匯率）';
         data.rateUpdatedAt = nowStr();
         save(); render();
-        alert(`台灣銀行來源暫時無法連線，已改用參考中價：\n1 元台幣 ≒ ¥${data.rate}\n（此為市場中價，與現金匯率略有差異，僅供參考）`);
+        toast('台銀暫無法連線，已改用參考中價：1 元台幣 ≒ ¥' + data.rate);
         return;
       }
       throw new Error('備援也失敗');
     } catch (e2) {
-      alert('匯率更新失敗，可能是網路問題或來源暫時無法連線。\n你仍可到「⚙️ 設定」手動輸入匯率。\n\n台灣銀行牌告：https://rate.bot.com.tw/xrt');
+      toast('匯率更新失敗，可到「⚙️ 設定」手動輸入匯率');
     }
   } finally {
     btn.disabled = false; btn.textContent = old;
@@ -1855,7 +1854,7 @@ function addAccountRow() {
 function removeAccount(i) {
   const a = data.accounts[i];
   if (data.txns.some(t => t.account === a.id || t.from === a.id || t.to === a.id)) {
-    alert('這個帳戶已有記錄使用，請先刪除相關記錄再移除帳戶。'); return;
+    toast('這個帳戶已有記錄使用，請先刪除相關記錄再移除帳戶'); return;
   }
   if (!confirm(`移除帳戶「${a.name}」？`)) return;
   data.accounts.splice(i, 1); renderAcctEditor();
@@ -1953,18 +1952,18 @@ function importJSON(e) {
       if (!data.categories) data.categories = defaultData().categories;
       clearSplitUndo(); // N1-a：換資料集前清分帳 undo 緩衝，杜絕舊 split 注入新帳本
       save(); refreshSelects(); render(); closeSettings();
-      alert('匯入成功 ✅\n（如需復原，請到「⚙️設定 → ♻️還原上次自動備份」）');
-    } catch (err) { alert('匯入失敗：' + err.message); }
+      toast('匯入成功 ✅（如需復原請到 設定 → 還原上次自動備份）');
+    } catch (err) { toast('匯入失敗：' + err.message); }
   };
   reader.readAsText(file); e.target.value = '';
 }
 function restoreAutobak() {
   let raw = null;
   try { raw = localStorage.getItem('jp_trip_ledger_v2_autobak'); } catch (e) {}
-  if (!raw) { alert('目前沒有可還原的自動備份。\n（每次「匯入備份」前會自動建立一份。）'); return; }
+  if (!raw) { toast('目前沒有可還原的自動備份'); return; }
   let d;
-  try { d = JSON.parse(raw); } catch (e) { alert('自動備份資料毀損，無法還原。'); return; }
-  if (!d || !d.accounts || !d.txns) { alert('自動備份內容不完整，無法還原。'); return; }
+  try { d = JSON.parse(raw); } catch (e) { toast('自動備份資料毀損，無法還原'); return; }
+  if (!d || !d.accounts || !d.txns) { toast('自動備份內容不完整，無法還原'); return; }
   if (!confirm('還原會用「上次匯入前的自動備份」覆蓋目前資料。\n（目前資料會被存成新的自動備份，可再按一次還原切回。）\n確定還原？')) return;
   const cur = JSON.stringify(data); // 還原前先留存目前資料，讓還原可逆
   data = sanitizeImport(d);
@@ -1972,7 +1971,7 @@ function restoreAutobak() {
   if (!data.categories) data.categories = defaultData().categories;
   try { localStorage.setItem('jp_trip_ledger_v2_autobak', cur); } catch (e) {}
   save(); refreshSelects(); render(); closeSettings();
-  alert('已還原上次自動備份 ✅');
+  toast('已還原上次自動備份 ✅');
 }
 function exportCSV() {
   const rows = [['日期', '類型', '大項', '小項', '品項/說明', '從帳戶', '到帳戶', '金額', '幣別', '台幣換算', '備註']];
