@@ -296,6 +296,58 @@
   .part-row .pp { font-size:11.5px; color:var(--muted); min-width:90px; text-align:right; }
   .split-balance { font-size:12.5px; margin-top:10px; }
   .split-balance.bad { color:var(--red); } .split-balance.ok { color:var(--green); }
+
+  /* ===================== 旅程總結卡 ===================== */
+  .sum-title { font-size:18px; font-weight:800; margin-bottom:12px; }
+  .sum-title span { display:block; font-size:13px; font-weight:500; color:var(--muted); margin-top:3px; }
+  .sum-chk { } /* 沿用 .chk / .chk.off / .chk-dot 既有勾選樣式 */
+  .sum-hint { font-size:12px; color:var(--muted); margin:2px 0 12px; }
+  .sum-stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:4px 0 2px; }
+  .sum-stat { background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .sum-stat.wide { grid-column:1 / -1; }
+  .sum-stat .k { font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .sum-stat .v { font-size:20px; font-weight:800; }
+  .sum-stat .sub { font-size:11.5px; color:var(--muted); margin-top:3px; line-height:1.5; }
+  .sum-table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  .sum-table th, .sum-table td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .sum-table th { color:var(--muted); font-weight:600; font-size:12px; }
+  .sum-table td.num, .sum-table th.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .sum-bar { height:5px; border-radius:3px; background:var(--green); margin-top:5px; min-width:3px; }
+  .sum-foot { font-size:11px; color:var(--muted); margin-top:16px; text-align:center; }
+
+  /* 列印 / 存 PDF：僅在「總結卡開啟時列印」生效——靠 body.sum-printing（beforeprint 時才加），
+     避免一般 Ctrl+P 在未開總結卡時誤印空白卡。只輸出總結卡本體，控制列(.sum-noprint)與未勾區塊不入鏡，深色轉白底黑字 */
+  @media print {
+    @page { margin:12mm; }
+    body.sum-printing { background:#fff !important; }
+    body.sum-printing > *:not(#summary-modal) { display:none !important; }
+    body.sum-printing #summary-modal { display:block !important; position:static !important; background:#fff !important;
+      padding:0 !important; overflow:visible !important; height:auto !important; }
+    body.sum-printing #summary-modal .modal { max-width:none !important; width:100% !important; margin:0 !important;
+      border:none !important; border-radius:0 !important; box-shadow:none !important;
+      background:#fff !important; color:#000 !important; padding:0 !important; }
+    /* 確保佔比長條/底色在 PDF 印得出來（瀏覽器預設常略過背景色）*/
+    body.sum-printing #summary-modal, body.sum-printing #summary-modal * {
+      -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+    body.sum-printing #summary-modal h2, body.sum-printing #summary-modal h3,
+    body.sum-printing .sum-title, body.sum-printing .sum-stat .v, body.sum-printing .sum-table td { color:#000 !important; }
+    body.sum-printing .sum-noprint { display:none !important; }
+    body.sum-printing .sum-stat { background:#f6f6f6 !important; border-color:#ccc !important; }
+    /* 低對比補強：含表格內帶行內 var(--muted) 的 .sub（需 !important 壓過行內樣式）、空狀態、箭頭 */
+    body.sum-printing .sum-stat .k, body.sum-printing .sum-stat .sub,
+    body.sum-printing .sum-table th, body.sum-printing .sum-table .sub,
+    body.sum-printing .sum-foot, body.sum-printing .sum-title span,
+    body.sum-printing .split-empty, body.sum-printing .empty,
+    body.sum-printing .settle-row .arrow, body.sum-printing .settle-note { color:#444 !important; }
+    body.sum-printing .sum-table td { border-color:#ddd !important; }
+    body.sum-printing .settle-box { background:#f6f6f6 !important; border-color:#ccc !important; }
+    body.sum-printing .settle-row { border-color:#ddd !important; color:#000 !important; }
+    body.sum-printing .settle-row .sum { color:#0a7d4d !important; }
+    /* 避免區塊/列在分頁處被切斷；表頭跨頁重複 */
+    body.sum-printing .sum-stat, body.sum-printing .sum-table tr,
+    body.sum-printing .settle-row, body.sum-printing .modal-section { break-inside:avoid; }
+    body.sum-printing .sum-table thead { display:table-header-group; }
+  }
 </style>
 </head>
 <body>
@@ -500,6 +552,7 @@
         <button class="btn btn-sm" onclick="exportJSON()">⬇️ 匯出備份(JSON)</button>
         <label class="btn btn-sm file-label">⬆️ 匯入備份<input type="file" accept=".json" onchange="importJSON(event)"></label>
         <button class="btn btn-sm" onclick="exportCSV()">📊 匯出 CSV(Excel)</button>
+        <button class="btn btn-sm" onclick="openSummary()">📋 旅程總結</button>
         <button class="btn btn-sm" onclick="restoreAutobak()">♻️ 還原上次自動備份</button>
         <button class="btn btn-sm btn-danger" onclick="clearAll()">🗑️ 清除全部</button>
       </div>
@@ -526,6 +579,21 @@
     </div>
     <div class="analysis-total" id="analysis-total"></div>
     <div id="analysis-body"></div>
+  </div>
+</div>
+
+<!-- 旅程總結卡（可自選顯示區塊；截圖 / 列印存 PDF）-->
+<div class="modal-bg" id="summary-modal">
+  <div class="modal modal-analysis" id="summary-card">
+    <div class="analysis-head sum-noprint">
+      <h2>📋 旅程總結</h2>
+      <button class="btn btn-sm" onclick="closeSummary()">✕ 關閉</button>
+    </div>
+    <div id="summary-content"></div>
+    <div class="row-end sum-noprint" style="margin-top:18px">
+      <button class="btn btn-sm" onclick="printSummary()">🖨️ 列印 / 存 PDF</button>
+      <button class="btn btn-primary" onclick="closeSummary()">完成</button>
+    </div>
   </div>
 </div>
 
@@ -999,6 +1067,45 @@ function computeTotals() {
   return { twd, jpy, totalTWD: twd + toTWD(jpy, 'JPY') };
 }
 
+// 旅程總結彙總（純函式；全部複用既有計算，不重造輪子）
+function computeTripSummary() {
+  const exp = data.txns.filter(t => t.type === 'expense');
+  let minD = null, maxD = null;
+  for (const t of exp) {
+    if (!t.date) continue;
+    if (minD === null || t.date < minD) minD = t.date;
+    if (maxD === null || t.date > maxD) maxD = t.date;
+  }
+  let days = 0;
+  if (minD && maxD) {
+    const a = new Date(minD + 'T00:00:00'), b = new Date(maxD + 'T00:00:00');
+    const d = Math.round((b - a) / 86400000) + 1;
+    days = (Number.isFinite(d) && d >= 1) ? d : (exp.length ? 1 : 0);
+  }
+  const totals = computeTotals();
+  const avgTWD = days > 0 ? totals.totalTWD / days : 0;
+  // 分類佔比（台幣域、全部分類，不套用分析面板的勾選排除）
+  const cats = chartRows('cat');
+  const catTotal = cats.reduce((s, r) => s + r.value, 0);
+  const catRows = cats.map(r => ({
+    label: r.label, value: r.value, pct: catTotal > 0 ? r.value / catTotal * 100 : 0
+  }));
+  // 支付方式 / 帳戶結餘
+  const accts = data.accounts.map(a => {
+    const st = acctStats(a.id);
+    return {
+      name: a.name, currency: a.currency, isCredit: a.kind === 'credit',
+      spent: st.spent, balance: st.balance, spentTWD: toTWD(st.spent, a.currency)
+    };
+  });
+  // 分攤結算（有同行成員才算；沿用 settleCur 顯示幣別域）
+  let settle = null;
+  if (data.members && data.members.length > 0) {
+    settle = computeSettlement(data.members, data.splits || [], settleCur);
+  }
+  return { minD, maxD, days, count: exp.length, totals, avgTWD, catRows, catTotal, accts, settle };
+}
+
 // 依模式彙總消費（'cat'大項 / 'sub'小項[複合鍵] / 'pay'支付方式[帳戶 id]）
 // 回傳 [{key, label, value}]，已排序（大→小），未套用勾選排除
 function chartRows(mode) {
@@ -1040,6 +1147,24 @@ function toggleExcluded(mode, key) {
   renderChart();
   const am = document.getElementById('analysis-modal');
   if (am && am.classList.contains('show')) renderAnalysisPanel();
+}
+
+// 旅程總結：使用者自選顯示哪些區塊（獨立 key、不進 data/匯出，與 jp_chart_excluded 同模式）
+const SUMMARY_SECTIONS = ['core', 'cat', 'pay', 'split'];
+function getSummarySections() {
+  const out = { core: true, cat: true, pay: true, split: true }; // 預設全開
+  try {
+    const s = JSON.parse(localStorage.getItem('jp_summary_sections') || '{}') || {};
+    for (const k of SUMMARY_SECTIONS) if (typeof s[k] === 'boolean') out[k] = s[k];
+  } catch (e) {}
+  return out;
+}
+function toggleSummarySection(k) {
+  if (!SUMMARY_SECTIONS.includes(k)) return;
+  const s = getSummarySections();
+  s[k] = !s[k];
+  try { localStorage.setItem('jp_summary_sections', JSON.stringify(s)); } catch (e) {}
+  renderSummary();
 }
 
 /* ===================== 格式化 ===================== */
@@ -1287,6 +1412,135 @@ function renderAnalysisPanel() {
   if (all.length === 0) { body.innerHTML = '<div class="empty">還沒有消費記錄可分析。</div>'; return; }
   body.innerHTML = chartBodyHTML(all, chartMode, 240, true);
 }
+
+/* ===================== 旅程總結卡 ===================== */
+function openSummary() {
+  if (typeof closeSettings === 'function') closeSettings(); // 從設定頁開啟時先收掉設定 modal，避免疊框
+  const m = document.getElementById('summary-modal');
+  if (m.classList.contains('show')) return; // 冪等：防快速雙擊疊加 pushState
+  lockScroll(true);
+  m.classList.add('show');
+  renderSummary();
+  try { history.pushState({ modal: 'summary' }, ''); } catch (e) {}
+}
+function closeSummary(fromPop) {
+  const m = document.getElementById('summary-modal');
+  if (!m.classList.contains('show')) return;
+  m.classList.remove('show');
+  setSumPrinting(false); // 關卡時清除任何殘留的列印 class（iOS 一般分頁 afterprint/matchMedia 未必觸發時的自癒備援）
+  lockScroll(false);
+  if (!fromPop) { try { if (history.state && history.state.modal === 'summary') history.back(); } catch (e) {} }
+}
+function setSumPrinting(on) { document.body.classList.toggle('sum-printing', !!on); }
+function printSummary() {
+  const m = document.getElementById('summary-modal');
+  if (!m.classList.contains('show')) openSummary();
+  // iOS / iPadOS 加到主畫面的 standalone PWA：window.print() 多為靜默 no-op（不丟例外，catch 抓不到）→ 主動引導截圖。
+  // navigator.standalone 為 iOS/iPadOS Safari 專屬屬性（桌面/Android 為 undefined），故不需 UA 比對——
+  // 也順帶涵蓋 iPadOS 偽裝 Mac UA 而漏判的情形。額外要求 maxTouchPoints>1，排除 macOS「加入 Dock」
+  // web app（桌面 Mac 無觸控、maxTouchPoints=0，列印其實可用，不該被引導去截圖）。
+  const iosPwa = (navigator.standalone === true) && ((navigator.maxTouchPoints || 0) > 1);
+  if (iosPwa || typeof window.print !== 'function') {
+    toast('此模式無法直接列印，請用螢幕截圖保存總結卡'); return;
+  }
+  // 同步掛上隔離 class，不押在 beforeprint——Safari（含桌面）不觸發 beforeprint，
+  // 否則按鈕列印時 @media print（全綁 body.sum-printing）會失效而印出整頁深色 App。
+  setSumPrinting(true);
+  try { window.print(); } catch (e) { setSumPrinting(false); toast('此裝置無法直接列印，請改用截圖保存'); }
+}
+function summaryDateRange(s) {
+  if (!s.minD || !s.maxD) return '';
+  const f = d => d.slice(5).replace('-', '/'); // YYYY-MM-DD → MM/DD
+  const range = s.minD === s.maxD ? f(s.minD) : `${f(s.minD)} – ${f(s.maxD)}`;
+  return `${range}，共 ${s.days} 天`;
+}
+function renderSummary() {
+  const host = document.getElementById('summary-content');
+  if (!host) return;
+  const sec = getSummarySections();
+  const s = computeTripSummary();
+  const name = (data.ledgerName || '日本旅遊記帳').trim() || '日本旅遊記帳';
+  const hasMembers = !!(data.members && data.members.length > 0);
+
+  // 標題（可列印）
+  let html = `<div class="sum-title">${escapeHtml(name)}` +
+    `<span>${s.count ? escapeHtml(summaryDateRange(s)) : '尚無消費記錄'}</span></div>`;
+
+  // 顯示項目 chips（不列印）；分攤 chip 僅在有成員時出現
+  const chip = (k, label) =>
+    `<label class="chk sum-chk${sec[k] ? '' : ' off'}" onclick="toggleSummarySection('${k}')">` +
+    `<span class="chk-dot" style="background:${sec[k] ? 'var(--green)' : 'var(--line)'}"></span>${label}</label>`;
+  html += `<div class="chk-list sum-noprint">` +
+    chip('core', '核心摘要') + chip('cat', '分類佔比') + chip('pay', '支付/結餘') +
+    (hasMembers ? chip('split', '分攤結算') : '') + `</div>`;
+  html += `<div class="sum-hint sum-noprint">勾選要顯示的區塊；列印或截圖只會呈現勾選的內容。</div>`;
+
+  // 邊界：完全沒有消費記錄
+  if (s.count === 0) {
+    html += `<div class="empty">還沒有消費記錄，記一筆後再回來看總結吧。</div>`;
+    host.innerHTML = html;
+    return;
+  }
+
+  // 區塊 A：核心摘要
+  if (sec.core) {
+    html += `<div class="modal-section"><h3>核心摘要</h3><div class="sum-stats">` +
+      `<div class="sum-stat wide"><div class="k">總花費（台幣換算）</div><div class="v">${fmt(s.totals.totalTWD, 'TWD')}</div>` +
+      `<div class="sub">日幣 ${fmt(s.totals.jpy, 'JPY')}（≒NT$${Math.round(toTWD(s.totals.jpy, 'JPY')).toLocaleString('en-US')}）　＋　台幣 ${fmt(s.totals.twd, 'TWD')}</div></div>` +
+      `<div class="sum-stat"><div class="k">每日平均</div><div class="v">${fmt(s.avgTWD, 'TWD')}</div><div class="sub">${s.days} 天</div></div>` +
+      `<div class="sum-stat"><div class="k">消費筆數</div><div class="v">${s.count}</div><div class="sub">筆</div></div>` +
+      `</div></div>`;
+  }
+
+  // 區塊 B：分類佔比
+  if (sec.cat) {
+    let rows = '';
+    for (const r of s.catRows) {
+      rows += `<tr><td>${escapeHtml(r.label)}<div class="sum-bar" style="width:${Math.max(3, Math.round(r.pct))}%"></div></td>` +
+        `<td class="num">${fmt(r.value, 'TWD')}</td><td class="num">${r.pct.toFixed(1)}%</td></tr>`;
+    }
+    html += `<div class="modal-section"><h3>分類佔比</h3>` +
+      (s.catRows.length ? `<table class="sum-table"><thead><tr><th>類別</th><th class="num">金額(台幣)</th><th class="num">佔比</th></tr></thead><tbody>${rows}</tbody></table>`
+                        : `<div class="split-empty">沒有可分類的消費。</div>`) + `</div>`;
+  }
+
+  // 區塊 C：支付方式 / 帳戶結餘
+  if (sec.pay) {
+    let rows = '';
+    for (const a of s.accts) {
+      // 台幣帳戶不顯示冗餘的「≒NT$」換算（與原幣相同）
+      const twdSub = a.currency === 'TWD' ? '' :
+        `<div class="sub" style="font-size:11px;color:var(--muted)">≒NT$${Math.round(a.spentTWD).toLocaleString('en-US')}</div>`;
+      rows += `<tr><td>${escapeHtml(a.name)}</td>` +
+        `<td class="num">${fmt(a.spent, a.currency)}${twdSub}</td>` +
+        `<td class="num">${a.isCredit ? '（信用卡）' : fmt(a.balance, a.currency)}</td></tr>`;
+    }
+    html += `<div class="modal-section"><h3>支付方式 / 帳戶結餘</h3>` +
+      `<table class="sum-table"><thead><tr><th>帳戶</th><th class="num">本次花費</th><th class="num">結餘</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  // 區塊 D：分攤結算（有成員才顯示）
+  if (sec.split && hasMembers && s.settle) {
+    const cur = settleCur;
+    let body;
+    if (!s.settle.transfers.length) {
+      body = `<div class="split-empty">目前無需互相轉帳（已結清或尚無分帳記錄）。</div>`;
+    } else {
+      body = `<div class="settle-box">` + s.settle.transfers.map(tr =>
+        `<div class="settle-row"><span class="pay">${escapeHtml(memberName(tr.from))}</span>` +
+        `<span class="arrow">→</span><span class="pay">${escapeHtml(memberName(tr.to))}</span>` +
+        `<span class="sum">${fmtCur(tr.amount, cur)}</span></div>`).join('') + `</div>`;
+    }
+    if (s.settle.skipped > 0) body += `<div class="settle-note">另有 ${s.settle.skipped} 筆待檢查的分帳未列入結算。</div>`;
+    html += `<div class="modal-section"><h3>分攤結算（${cur === 'JPY' ? '日幣' : '台幣'}）</h3>${body}</div>`;
+  }
+
+  // 頁尾（可列印；標示出處與產生時間）
+  html += `<div class="sum-foot">${escapeHtml(name)}　·　產生於 ${nowStr()}　·　日本旅遊記帳</div>`;
+
+  host.innerHTML = html;
+}
+
 // 鑽取：取某模式某 key 對應的所有消費筆 / 顯示標籤 / 唯讀明細列
 function txnsForKey(mode, key) {
   return data.txns.filter(t => {
@@ -2020,16 +2274,32 @@ function toast(msg) {
 /* 點背景關閉 modal */
 document.getElementById('settings-modal').addEventListener('click', e => { if (e.target.id === 'settings-modal') closeSettings(); });
 document.getElementById('analysis-modal').addEventListener('click', e => { if (e.target.id === 'analysis-modal') closeAnalysis(); });
+document.getElementById('summary-modal').addEventListener('click', e => { if (e.target.id === 'summary-modal') closeSummary(); });
+// 列印隔離：總結卡開啟時才讓 @media print（全綁 body.sum-printing）生效。三路覆蓋並自癒還原：
+//  ① 按鈕 printSummary() 同步加 class（跨平台保證，見該函式）
+//  ② 桌面 Chrome/Firefox：beforeprint/afterprint
+//  ③ Safari（含桌面與 iOS，歷來不觸發 beforeprint）：用 matchMedia('print') 的 change 補上
+function sumPrintSync(entering) {
+  if (entering) { if (document.getElementById('summary-modal').classList.contains('show')) setSumPrinting(true); }
+  else { setSumPrinting(false); } // 離開列印一律還原，避免 stale class 害下次未開卡列印印出空白
+}
+window.addEventListener('beforeprint', () => sumPrintSync(true));
+window.addEventListener('afterprint', () => sumPrintSync(false));
+try {
+  const printMQ = window.matchMedia && window.matchMedia('print');
+  if (printMQ && printMQ.addEventListener) printMQ.addEventListener('change', e => sumPrintSync(e.matches));
+} catch (e) {}
 document.getElementById('f-toamount').addEventListener('input', () => { toamtTouched = true; });
 /* 點選單以外處關閉「⋯」操作選單（toggleOps 已 stopPropagation，不會誤關自己）*/
 document.addEventListener('click', closeAllOps);
 /* Esc 關閉最上層 modal；Android 返回鍵（popstate）關閉分析面板 */
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (document.getElementById('analysis-modal').classList.contains('show')) closeAnalysis();
+  if (document.getElementById('summary-modal').classList.contains('show')) closeSummary();
+  else if (document.getElementById('analysis-modal').classList.contains('show')) closeAnalysis();
   else if (document.getElementById('settings-modal').classList.contains('show')) closeSettings();
 });
-window.addEventListener('popstate', () => closeAnalysis(true));
+window.addEventListener('popstate', () => { closeAnalysis(true); closeSummary(true); });
 /* 消費分析勾選清單（事件委派；內嵌卡片 + 完整分析面板共用）*/
 document.getElementById('chart').addEventListener('change', onChartCheckChange);
 document.getElementById('analysis-modal').addEventListener('change', onChartCheckChange);
