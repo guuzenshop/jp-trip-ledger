@@ -1,7 +1,7 @@
 {
-  "name": "日本旅遊記帳",
-  "short_name": "日本記帳",
-  "description": "日本旅遊用單頁離線記帳：多支付方式、即時匯率、消費分析",
+  "name": "旅行記帳",
+  "short_name": "旅行記帳",
+  "description": "單頁離線旅行記帳：多支付方式、即時匯率（可隱藏）、消費分析、多人分攤",
   "lang": "zh-Hant",
   "start_url": "./",
   "scope": "./",

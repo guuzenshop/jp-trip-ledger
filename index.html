@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-title" content="日本記帳" />
+<meta name="apple-mobile-web-app-title" content="旅行記帳" />
 <meta name="theme-color" content="#0f1115" />
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icon.svg" />
 <link rel="apple-touch-icon" href="icon.svg" />
-<title>日本旅遊記帳 🇯🇵</title>
+<title>旅行記帳</title>
 <style>
   :root {
     --bg:#0f1115; --panel:#1a1d24; --panel2:#232733; --line:#2e3340;
@@ -382,13 +382,22 @@
   .batch-bar .bb-count { font-weight:700; margin-right:2px; }
   body.has-batch-bar { padding-bottom:140px; }
   @media (max-width:560px) { .batch-bar { padding:8px 10px; } }
+
+  /* 隱藏匯率（台灣旅行模式）：開啟後不顯示匯率相關 UI */
+  body.hide-rate .ratebar,
+  body.hide-rate #s-rate-field,
+  body.hide-rate #amt-preview,
+  body.hide-rate #fee-preview,
+  body.hide-rate #total-breakdown,
+  body.hide-rate .twd.conv { display:none !important; }  /* .conv = 純台幣換算行；不含「不計入消費」等狀態行 */
 </style>
 </head>
 <body>
+<script>/* 台灣模式：首屏渲染前預載，避免匯率列閃現（FOUC） */try{if(localStorage.getItem('jp_hide_rate')==='1')document.body.classList.add('hide-rate');}catch(e){}</script>
 <div class="wrap">
 
   <header>
-    <h1 id="app-title">🇯🇵 日本旅遊記帳</h1>
+    <h1 id="app-title">✈️ 旅行記帳</h1>
     <button class="btn" onclick="openSettings()">⚙️ 設定</button>
   </header>
 
@@ -403,7 +412,7 @@
 
   <!-- 摘要 -->
   <div class="summary">
-    <div class="total-label">總消費（台幣換算）</div>
+    <div class="total-label" id="total-label">總消費（台幣換算）</div>
     <div class="total-big" id="total-twd">NT$0</div>
     <div class="total-sub" id="total-breakdown"></div>
     <div class="accounts-head" onclick="toggleAccounts()">
@@ -597,6 +606,12 @@
     </div>
 
     <div class="field">
+      <label>匯率換算</label>
+      <label class="split-toggle"><input type="checkbox" id="s-hide-rate" /> 隱藏匯率欄位（在台灣旅行用不到）</label>
+      <div class="hint">勾選後，首頁的匯率列、設定中的匯率欄，以及消費的台幣換算顯示都會隱藏，適合純台幣的國內旅行。隨時可取消恢復。</div>
+    </div>
+
+    <div class="field" id="s-rate-field">
       <label>匯率（1 元台幣 = ? 日圓）</label>
       <input type="number" id="s-rate" inputmode="decimal" step="0.0001" />
       <div class="hint">可按上方「🔄 更新最新匯率」自動帶入台灣銀行現金匯率，或在此手動修改。</div>
@@ -745,7 +760,7 @@ const DEFAULT_FEE_TYPES = ['信用卡手續費', 'ATM提領', '跨行轉帳', '�
 
 function defaultData() {
   return {
-    ledgerName: '日本旅遊記帳',
+    ledgerName: '旅行記帳',
     rate: 4.98,
     rateSource: '預設值（尚未更新）',
     rateUpdatedAt: null,
@@ -1115,6 +1130,7 @@ function load() {
     if (d.rateSource === undefined) d.rateSource = '手動設定';
     if (d.rateUpdatedAt === undefined) d.rateUpdatedAt = null;
     if (typeof d.ledgerName !== 'string' || !d.ledgerName.trim()) d.ledgerName = def.ledgerName;
+    if (d.ledgerName === '日本旅遊記帳') d.ledgerName = '旅行記帳'; // 改名遷移：未自訂帳本名的舊使用者一併更新顯示名
     if (!Array.isArray(d.members)) d.members = [];
     if (!Array.isArray(d.splits)) d.splits = [];
     normalizeSplitData(d);          // 必修B：load 路徑也走同一份淨化（冪等）
@@ -1376,13 +1392,14 @@ function render() {
   renderDateStrip();
   renderTxns();
   renderSplit();
+  applyHideRate();
 }
 
 function renderTitle() {
-  const name = (data.ledgerName || '日本旅遊記帳').trim() || '日本旅遊記帳';
+  const name = (data.ledgerName || '旅行記帳').trim() || '旅行記帳';
   const el = document.getElementById('app-title');
-  if (el) el.textContent = '🇯🇵 ' + name;
-  document.title = name.replace(/[\r\n]+/g, ' ') + ' 🇯🇵';
+  if (el) el.textContent = '✈️ ' + name;
+  document.title = name.replace(/[\r\n]+/g, ' ');
 }
 function renderRate() {
   document.getElementById('rate-big').textContent = `1 元台幣 ≒ ¥${data.rate}　|　¥100 ≒ NT$${(100 / data.rate).toFixed(1)}`;
@@ -1403,14 +1420,14 @@ function renderAccounts() {
         <div class="name"><span>${escapeHtml(a.name)}</span><span class="tag">信用卡</span></div>
         <div class="bal">${fmt(s.spent, a.currency)}</div>
         <div class="detail">本次旅程累計已刷</div>
-        <div class="twd">≒ NT$${Math.round(toTWD(s.spent, a.currency)).toLocaleString('en-US')}</div>`;
+        <div class="twd conv">≒ NT$${Math.round(toTWD(s.spent, a.currency)).toLocaleString('en-US')}</div>`;
     } else {
       const out = s.out > 0 ? `　|　已轉出 ${fmt(s.out, a.currency)}` : '';
       div.innerHTML = `
         <div class="name"><span>${escapeHtml(a.name)}</span><span class="tag">${escapeHtml(a.currency)}</span></div>
         <div class="bal">${fmt(s.balance, a.currency)}</div>
         <div class="detail">額度 ${fmt(s.storedIn, a.currency)}　|　已花 ${fmt(s.spent, a.currency)}${out}</div>
-        <div class="twd">餘額 ≒ NT$${Math.round(toTWD(s.balance, a.currency)).toLocaleString('en-US')}</div>`;
+        <div class="twd conv">餘額 ≒ NT$${Math.round(toTWD(s.balance, a.currency)).toLocaleString('en-US')}</div>`;
     }
     el.appendChild(div);
   }
@@ -1596,7 +1613,7 @@ function setAnalysisMode(m) {
 function renderAnalysisPanel() {
   const t = computeTotals();
   const totalEl = document.getElementById('analysis-total');
-  if (totalEl) totalEl.innerHTML = `總消費（台幣換算）<b>${fmt(t.totalTWD, 'TWD')}</b>`;
+  if (totalEl) totalEl.innerHTML = `總消費${hideRate() ? '' : '（台幣換算）'}<b>${fmt(t.totalTWD, 'TWD')}</b>`;
   const body = document.getElementById('analysis-body');
   if (!body) return;
   const all = chartRows(chartMode);
@@ -1650,7 +1667,7 @@ function renderSummary() {
   if (!host) return;
   const sec = getSummarySections();
   const s = computeTripSummary();
-  const name = (data.ledgerName || '日本旅遊記帳').trim() || '日本旅遊記帳';
+  const name = (data.ledgerName || '旅行記帳').trim() || '旅行記帳';
   const hasMembers = !!(data.members && data.members.length > 0);
 
   // 標題（可列印）
@@ -1676,8 +1693,8 @@ function renderSummary() {
   // 區塊 A：核心摘要
   if (sec.core) {
     html += `<div class="modal-section"><h3>核心摘要</h3><div class="sum-stats">` +
-      `<div class="sum-stat wide"><div class="k">總花費（台幣換算）</div><div class="v">${fmt(s.totals.totalTWD, 'TWD')}</div>` +
-      `<div class="sub">日幣 ${fmt(s.totals.jpy, 'JPY')}（≒NT$${Math.round(toTWD(s.totals.jpy, 'JPY')).toLocaleString('en-US')}）　＋　台幣 ${fmt(s.totals.twd, 'TWD')}</div></div>` +
+      `<div class="sum-stat wide"><div class="k">總花費${hideRate() ? '' : '（台幣換算）'}</div><div class="v">${fmt(s.totals.totalTWD, 'TWD')}</div>` +
+      (hideRate() ? '' : `<div class="sub">日幣 ${fmt(s.totals.jpy, 'JPY')}（≒NT$${Math.round(toTWD(s.totals.jpy, 'JPY')).toLocaleString('en-US')}）　＋　台幣 ${fmt(s.totals.twd, 'TWD')}</div>`) + `</div>` +
       `<div class="sum-stat"><div class="k">每日平均</div><div class="v">${fmt(s.avgTWD, 'TWD')}</div><div class="sub">${s.days} 天</div></div>` +
       `<div class="sum-stat"><div class="k">消費筆數</div><div class="v">${s.count}</div><div class="sub">筆</div></div>` +
       `</div></div>`;
@@ -1727,7 +1744,7 @@ function renderSummary() {
   }
 
   // 頁尾（可列印；標示出處與產生時間）
-  html += `<div class="sum-foot">${escapeHtml(name)}　·　產生於 ${nowStr()}　·　日本旅遊記帳</div>`;
+  html += `<div class="sum-foot">${escapeHtml(name)}　·　產生於 ${nowStr()}　·　旅行記帳</div>`;
 
   host.innerHTML = html;
 }
@@ -1757,7 +1774,7 @@ function drillRowHTML(t) {
     `<span class="chip" style="background:${escapeHtml(a ? a.color : '#888')}">${a ? escapeHtml(a.name) : '?'}</span>` +
     (t.note ? `<span>· ${escapeHtml(t.note)}</span>` : '') + `</div></div>` +
     `<div class="amt"><div class="v exp">−${fmt(t.amount, cur).replace('-', '')}</div>` +
-    `<div class="twd">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div></div></div>`;
+    `<div class="twd conv">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div></div></div>`;
 }
 function renderDrilldown(mode, key) {
   const body = document.getElementById('analysis-body');
@@ -1798,7 +1815,7 @@ function txnInnerHTML(t, showDate) {
       </div>
       <div class="amt">
         <div class="v exp">−${fmt(t.amount, cur).replace('-', '')}</div>
-        <div class="twd">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div>
+        <div class="twd conv">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div>
       </div>
       ${opsHTML(t.id)}`;
   }
@@ -2300,6 +2317,7 @@ function openSettings() {
   document.getElementById('s-cats').value = serializeCats(data.categories);
   renderAcctEditor();
   document.getElementById('s-split-enabled').checked = splitEnabled();
+  document.getElementById('s-hide-rate').checked = hideRate();
   document.getElementById('settings-modal').classList.add('show');
 }
 function closeSettings() { document.getElementById('settings-modal').classList.remove('show'); }
@@ -2359,12 +2377,13 @@ function saveSettings() {
     data.accounts[i][k] = v;
   });
   const ln = (document.getElementById('s-ledger-name').value || '').trim().slice(0, 80);
-  data.ledgerName = ln || '日本旅遊記帳';
+  data.ledgerName = ln || '旅行記帳';
   const r = Number(document.getElementById('s-rate').value);
   if (r > 0 && r !== data.rate) { data.rate = r; data.rateSource = '手動設定'; data.rateUpdatedAt = nowStr(); }
   const cats = parseCats(document.getElementById('s-cats').value);
   if (Object.keys(cats).length) data.categories = cats;
   try { localStorage.setItem('jp_split_enabled', document.getElementById('s-split-enabled').checked ? '1' : '0'); } catch (e) {}
+  try { localStorage.setItem('jp_hide_rate', document.getElementById('s-hide-rate').checked ? '1' : '0'); } catch (e) {}
   save(); refreshSelects(); render();
   if (entryMode === 'multi') renderMultiRows();                                  // 帳戶/分類變更同步多列下拉
   const feeOnEl = document.getElementById('f-fee-on'); if (feeOnEl && feeOnEl.checked) refreshFeeSelects();
@@ -2387,13 +2406,13 @@ function sanitizeFilename(s) {
     out += ch;
   }
   out = out.replace(/\s+/g, ' ').trim();
-  if (!out) out = '日本記帳';
+  if (!out) out = '旅行記帳';
   return out.slice(0, 40);
 }
 // 清洗匯入資料：避免被竄改的 JSON 注入或污染（縱深防禦）
 function sanitizeImport(d) {
   const CUR = ['JPY', 'TWD'];
-  d.ledgerName = (typeof d.ledgerName === 'string' && d.ledgerName.trim()) ? d.ledgerName.trim().slice(0, 80) : '日本旅遊記帳';
+  d.ledgerName = (typeof d.ledgerName === 'string' && d.ledgerName.trim()) ? d.ledgerName.trim().slice(0, 80) : '旅行記帳';
   d.rate = Number(d.rate) > 0 ? Number(d.rate) : defaultData().rate; // 壞匯率 → 退回預設，避免 toTWD 異常
   d.accounts = (d.accounts || []).map(a => ({ ...a,
     currency: CUR.includes(a.currency) ? a.currency : 'JPY',
@@ -2426,7 +2445,7 @@ function importJSON(e) {
       const d = JSON.parse(reader.result);
       if (!d.accounts || !d.txns) throw new Error('檔案格式不正確');
       const incoming = (typeof d.ledgerName === 'string' && d.ledgerName.trim()) ? d.ledgerName.trim() : '（未命名帳本）';
-      const current = data.ledgerName || '日本旅遊記帳';
+      const current = data.ledgerName || '旅行記帳';
       if (!confirm(`匯入會覆蓋目前所有資料。\n\n目前：「${current}」\n匯入：「${incoming}」\n\n系統會先自動備份目前資料（僅保留最近一次，可在設定中還原）。\n確定匯入？`)) return;
       try { localStorage.setItem('jp_trip_ledger_v2_autobak', JSON.stringify(data)); }
       catch (err) { if (!confirm('⚠️ 自動備份目前資料失敗（可能空間不足）。\n繼續匯入將無法自動還原舊資料，建議先手動「匯出備份」。\n仍要繼續匯入嗎？')) return; }
@@ -2471,7 +2490,7 @@ function exportCSV() {
   // CSV 公式注入防護：以 = + - @ 開頭的儲存格前綴單引號，避免 Excel/Sheets 當公式執行
   const csvCell = c => { let s = String(c); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
   const csv = '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\n');
-  download(`日本記帳_${today()}.csv`, csv, 'text/csv');
+  download(`旅行記帳_${today()}.csv`, csv, 'text/csv');
 }
 function clearAll() {
   if (!confirm('⚠️ 這會清除所有記錄與設定，回到初始狀態。建議先匯出備份。確定清除？')) return;
@@ -2600,6 +2619,15 @@ function applySplitCollapsed() {
   try { const v = localStorage.getItem('jp_split_collapsed'); if (v !== null) collapsed = v === '1'; } catch (e) {}
   const c = document.getElementById('split-card');
   if (c) c.classList.toggle('split-collapsed', collapsed);
+}
+function hideRate() {
+  try { return localStorage.getItem('jp_hide_rate') === '1'; } catch (e) { return false; }
+}
+function applyHideRate() {
+  const on = hideRate();
+  document.body.classList.toggle('hide-rate', on);
+  const lbl = document.getElementById('total-label');
+  if (lbl) lbl.textContent = on ? '總消費' : '總消費（台幣換算）';
 }
 function splitEnabled() {
   try { const v = localStorage.getItem('jp_split_enabled'); return v === null ? false : v === '1'; } catch (e) { return false; }
