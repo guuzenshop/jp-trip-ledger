@@ -348,6 +348,40 @@
     body.sum-printing .settle-row, body.sum-printing .modal-section { break-inside:avoid; }
     body.sum-printing .sum-table thead { display:table-header-group; }
   }
+
+  /* ===================== 手續費 / 批量編輯 / 多列輸入 ===================== */
+  /* 手續費收合 */
+  .fee-toggle { display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13.5px; color:var(--muted); margin-top:10px; user-select:none; }
+  .fee-toggle input { width:17px; height:17px; flex-shrink:0; }
+  #fee-fields { margin-top:0; }
+
+  /* 進入表單模式切換（單筆/多列）*/
+  #entry-mode-seg { flex-shrink:0; }
+
+  /* 多列一次輸入 */
+  .multi-row { display:grid; grid-template-columns:128px 1.1fr .9fr .9fr 1.4fr .9fr auto; gap:6px; align-items:center; margin-bottom:7px; }
+  .multi-row input, .multi-row select { padding:8px 9px; font-size:13.5px; }
+  .multi-row.bad input, .multi-row.bad select { border-color:var(--red); }
+  .multi-del { width:34px; height:36px; padding:0; }
+  @media (max-width:560px) {
+    .multi-row { grid-template-columns:1fr 1fr; gap:5px; padding:9px 9px 9px; border:1px solid var(--line); border-radius:10px; margin-bottom:10px; position:relative; }
+    .multi-row .multi-del { position:absolute; top:6px; right:6px; width:28px; height:28px; }
+  }
+
+  /* 選取模式（多選批量編輯）*/
+  #select-toggle.active { background:var(--green); color:#06281c; border-color:var(--green); font-weight:700; }
+  #txn-list.selecting .ops, #txn-list.selecting .move-ctrl, #txn-list.selecting .drag-handle { display:none !important; }
+  .sel-check { display:flex; align-items:center; flex-shrink:0; padding-right:2px; cursor:pointer; }
+  .sel-check input { width:20px; height:20px; }
+  .txn.selected { border-color:var(--green); background:#16241c; }
+
+  /* 批量操作浮動列 */
+  .batch-bar { position:fixed; left:0; right:0; bottom:0; z-index:60; background:var(--panel2); border-top:1px solid var(--line);
+    padding:10px 14px; display:none; flex-wrap:wrap; gap:8px; align-items:center; box-shadow:0 -6px 20px rgba(0,0,0,.42); }
+  .batch-bar.show { display:flex; }
+  .batch-bar .bb-count { font-weight:700; margin-right:2px; }
+  body.has-batch-bar { padding-bottom:140px; }
+  @media (max-width:560px) { .batch-bar { padding:8px 10px; } }
 </style>
 </head>
 <body>
@@ -395,7 +429,13 @@
 
   <!-- 新增表單 -->
   <div class="card" id="form-card">
-    <div class="card-title"><span class="t toggle" onclick="toggleForm()">➕ <span id="form-mode-title">新增記錄</span> <span class="ah-arrow" id="form-arrow">▾</span></span></div>
+    <div class="card-title">
+      <span class="t toggle" onclick="toggleForm()">➕ <span id="form-mode-title">新增記錄</span> <span class="ah-arrow" id="form-arrow">▾</span></span>
+      <div class="seg-mini" id="entry-mode-seg">
+        <label><input type="radio" name="entrymode" value="single" checked onchange="setEntryMode('single')"><span>單筆</span></label>
+        <label><input type="radio" name="entrymode" value="multi" onchange="setEntryMode('multi')"><span>多列</span></label>
+      </div>
+    </div>
     <form id="entry-form" onsubmit="return submitForm(event)">
       <div class="seg">
         <label><input type="radio" name="ttype" value="expense" checked onchange="onTypeChange()"><span>💸 消費</span></label>
@@ -455,11 +495,39 @@
         </div>
       </div>
 
+      <div id="fee-block">
+        <label class="fee-toggle"><input type="checkbox" id="f-fee-on" onchange="onFeeToggle()"> ➕ 加手續費（刷卡手續費／匯差／ATM／跨行）</label>
+        <div class="grid-form" id="fee-fields" style="display:none">
+          <div class="field">
+            <label>手續費金額</label>
+            <input type="number" id="f-fee-amount" inputmode="decimal" step="any" placeholder="0" oninput="updateFeePreview()" />
+            <div class="preview" id="fee-preview"></div>
+          </div>
+          <div class="field">
+            <label>扣款帳戶</label>
+            <select id="f-fee-account" onchange="updateFeePreview()"></select>
+          </div>
+          <div class="field full">
+            <label>類型</label>
+            <select id="f-fee-type"></select>
+          </div>
+        </div>
+      </div>
+
       <div class="form-actions">
         <button type="submit" class="btn btn-primary" id="f-submit">新增</button>
         <button type="button" class="btn btn-ghost" id="f-cancel" style="display:none" onclick="cancelEdit()">取消編輯</button>
       </div>
     </form>
+
+    <div id="multi-entry" style="display:none">
+      <div class="hint" style="margin:4px 0 10px">一次輸入多筆「消費」：每列填日期／帳戶／分類／品項／金額，最後按「全部送出」。空白列會自動略過。</div>
+      <div id="multi-rows"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-sm" onclick="addMultiRow()">＋ 新增一列</button>
+        <button type="button" class="btn btn-primary" style="flex:1" onclick="submitMulti()">全部送出</button>
+      </div>
+    </div>
   </div>
 
   <!-- 列表 -->
@@ -468,6 +536,7 @@
     <button class="btn btn-sm active" data-f="all" onclick="setFilter('all')">全部</button>
     <button class="btn btn-sm" data-f="expense" onclick="setFilter('expense')">消費</button>
     <button class="btn btn-sm" data-f="topup" onclick="setFilter('topup')">儲值</button>
+    <button class="btn btn-sm" id="select-toggle" onclick="toggleSelectMode()">☑️ 選取</button>
     <span style="flex:1"></span>
     <span class="hint" id="count-line"></span>
   </div>
@@ -652,10 +721,27 @@
 
 <div id="toast"></div>
 
+<!-- 批量操作浮動列（選取模式時出現）-->
+<div id="batch-bar" class="batch-bar"></div>
+
+<!-- 批量修改 通用 Modal（取代原生 prompt/confirm，PWA 內穩定）-->
+<div class="modal-bg" id="batch-modal">
+  <div class="modal" style="max-width:430px">
+    <h2 id="batch-modal-title">批量修改</h2>
+    <div id="batch-modal-body"></div>
+    <div class="row-end">
+      <button class="btn btn-ghost" onclick="closeBatchModal()">取消</button>
+      <button class="btn btn-primary" id="batch-modal-ok" onclick="confirmBatchModal()">套用</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ===================== 資料層 ===================== */
 const STORE_KEY = 'jp_trip_ledger_v2';
 const KEYSEP = String.fromCharCode(0); // 小項複合鍵分隔符（NUL，使用者不可能輸入；不回拆、僅當 Map 鍵）
+const FEE_CAT = '手續費';               // 手續費大項（單一真相源；類型＝其小項，於設定的「消費分類」編輯）
+const DEFAULT_FEE_TYPES = ['信用卡手續費', 'ATM提領', '跨行轉帳', '匯差', '其他'];
 
 function defaultData() {
   return {
@@ -677,6 +763,7 @@ function defaultData() {
       '住宿': ['飯店','民宿'],
       '門票': ['景點','展覽','樂園'],
       '其他': ['雜費','通訊','小費'],
+      [FEE_CAT]: DEFAULT_FEE_TYPES.slice(),
     },
     txns: [],
     members: [],
@@ -1009,6 +1096,11 @@ let sortMode = 'date_desc';
 let chartMode = 'cat';
 let editingId = null;
 let toamtTouched = false;
+let selectMode = false;            // 選取（多選批量編輯）模式
+let selectedIds = new Set();       // 已選取的 txn id
+let entryMode = 'single';          // 'single' | 'multi'（新增表單模式）
+let multiRows = [];                // 多列輸入暫存
+let _batchModalApply = null;       // 批量 modal 套用 callback
 
 function load() {
   try {
@@ -1018,6 +1110,8 @@ function load() {
     if (!d.accounts || !d.txns) return defaultData();
     const def = defaultData();
     if (!d.categories) d.categories = def.categories;
+    if (!d.categories[FEE_CAT] || !Array.isArray(d.categories[FEE_CAT]) || !d.categories[FEE_CAT].length)
+      d.categories[FEE_CAT] = (def.categories[FEE_CAT] || DEFAULT_FEE_TYPES).slice(); // 附加手續費分類（不覆蓋既有）
     if (d.rateSource === undefined) d.rateSource = '手動設定';
     if (d.rateUpdatedAt === undefined) d.rateUpdatedAt = null;
     if (typeof d.ledgerName !== 'string' || !d.ledgerName.trim()) d.ledgerName = def.ledgerName;
@@ -1065,6 +1159,103 @@ function computeTotals() {
     else jpy += Number(t.amount) || 0;
   }
   return { twd, jpy, totalTWD: twd + toTWD(jpy, 'JPY') };
+}
+
+/* ===================== 手續費 / 批量 純函式（?test=1 自測；不依賴 DOM）===================== */
+// 建一筆手續費 expense（不含 id；caller 指派）。baseLabel = 主筆品項 / 轉帳描述
+function buildFeeTxn(o) {
+  o = o || {};
+  const amt = Number(o.amount);
+  return {
+    type: 'expense',
+    date: o.date,
+    account: o.account,
+    cat: FEE_CAT,
+    subcat: o.type || '',
+    item: '手續費' + (o.baseLabel ? ' · ' + o.baseLabel : ''),
+    amount: Number.isFinite(amt) ? amt : 0,
+    note: o.note || ''
+  };
+}
+// 轉帳對調方向：from↔to，amount↔toAmount（同幣別時 toAmount 可能為 null → 回填 amount）
+function swapTopupDirection(t) {
+  const newAmount = (t.toAmount != null ? Number(t.toAmount) : Number(t.amount)) || 0;
+  const newToAmount = Number(t.amount) || 0;
+  return { from: t.to, to: t.from, amount: newAmount, toAmount: newToAmount };
+}
+// 批量改帳戶的金額換算：mode='keep' 保持原數字；'convert' 依匯率把舊幣別換到新幣別
+function convertAmountOnAccountChange(amount, oldCur, newCur, rate, mode) {
+  const a = Number(amount) || 0;
+  if (mode !== 'convert' || oldCur === newCur) return a;
+  const r = Number(rate) || 1;                 // 1 台幣 = r 日圓
+  const twd = oldCur === 'TWD' ? a : a / r;     // 先換成台幣
+  return newCur === 'TWD' ? twd : twd * r;      // 再換到目標幣別
+}
+// 多列新增解析：rows=[{date,account,cat,subcat,item,amount}]；回 {valid:[txn],errors:[{i,msg}],emptyCount}
+function parseMultiRowEntries(rows, accountIds) {
+  const valid = [], errors = [];
+  let emptyCount = 0;
+  const idSet = accountIds instanceof Set ? accountIds : new Set(accountIds || []);
+  (rows || []).forEach((row, i) => {
+    const item = (row.item || '').trim();
+    const amtRaw = row.amount;
+    const amount = Number(amtRaw);
+    const hasAmount = amtRaw !== '' && amtRaw != null && Number.isFinite(amount);
+    // 「有資料」＝品項或金額有填；兩者皆空視為空白列略過
+    if (item === '' && !hasAmount) { emptyCount++; return; }
+    const account = row.account || '';
+    if (!account || !idSet.has(account)) { errors.push({ i, msg: '缺支付帳戶' }); return; }
+    if (!item) { errors.push({ i, msg: '缺品項' }); return; }
+    if (!Number.isFinite(amount) || amount <= 0) { errors.push({ i, msg: '金額需大於 0' }); return; }
+    valid.push({
+      type: 'expense',
+      date: /^\d{4}-\d{2}-\d{2}$/.test(row.date || '') ? row.date : today(),
+      account,
+      cat: row.cat || '',
+      subcat: (row.subcat || '').trim(),
+      item,
+      amount,
+      note: (row.note || '').trim()
+    });
+  });
+  return { valid, errors, emptyCount };
+}
+// ?test=1 自測（手續費/對調/換算/多列）
+function runBatchFeeSelfTest() {
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (c, n) => { if (c) pass++; else { fail++; fails.push(n); } };
+
+  // buildFeeTxn
+  let f = buildFeeTxn({ date: '2026-06-26', account: 'card', type: '信用卡手續費', amount: 240, baseLabel: '機票' });
+  ok(f.type === 'expense' && f.cat === FEE_CAT && f.subcat === '信用卡手續費' && f.amount === 240 && f.account === 'card' && f.item.indexOf('機票') >= 0, 'buildFeeTxn 基本');
+  ok(buildFeeTxn({ amount: 'abc' }).amount === 0, 'buildFeeTxn 壞金額→0');
+
+  // swapTopupDirection
+  let s = swapTopupDirection({ from: 'twd', to: 'jpy', amount: 10000, toAmount: 48000 });
+  ok(s.from === 'jpy' && s.to === 'twd' && s.amount === 48000 && s.toAmount === 10000, 'swap 跨幣別 amount/toAmount 對調');
+  s = swapTopupDirection({ from: 'a', to: 'b', amount: 500, toAmount: null });
+  ok(s.from === 'b' && s.to === 'a' && s.amount === 500 && s.toAmount === 500, 'swap 同幣別 toAmount=null→500');
+
+  // convertAmountOnAccountChange
+  ok(convertAmountOnAccountChange(1000, 'JPY', 'JPY', 4.98, 'convert') === 1000, 'convert 同幣別不變');
+  ok(convertAmountOnAccountChange(1000, 'TWD', 'JPY', 5, 'keep') === 1000, 'keep 保持原數字');
+  ok(convertAmountOnAccountChange(1000, 'TWD', 'JPY', 5, 'convert') === 5000, 'convert TWD→JPY ×rate');
+  ok(convertAmountOnAccountChange(5000, 'JPY', 'TWD', 5, 'convert') === 1000, 'convert JPY→TWD ÷rate');
+
+  // parseMultiRowEntries
+  const ids = new Set(['twd', 'jpy']);
+  let r = parseMultiRowEntries([
+    { date: '2026-06-26', account: 'jpy', cat: '飲食', subcat: '午餐', item: '拉麵', amount: '980' },
+    { date: '', account: '', cat: '', subcat: '', item: '', amount: '' },                       // 全空→略過
+    { date: '2026-06-26', account: 'jpy', cat: '交通', subcat: '', item: '', amount: '500' },    // 缺品項→error
+    { date: '2026-06-26', account: 'jpy', cat: '交通', subcat: '電鐵', item: '電車', amount: '0' }, // 金額0→error
+    { date: '2026-06-26', account: 'ghost', cat: '', subcat: '', item: '紀念品', amount: '300' },  // 帳戶不存在→error
+  ], ids);
+  ok(r.valid.length === 1 && r.valid[0].item === '拉麵' && r.valid[0].amount === 980, 'multiRow 1 筆合格');
+  ok(r.emptyCount === 1, 'multiRow 略過 1 空列');
+  ok(r.errors.length === 3, 'multiRow 3 列不合格');
+
+  return { pass, fail, fails };
 }
 
 // 旅程總結彙總（純函式；全部複用既有計算，不重造輪子）
@@ -1627,8 +1818,13 @@ function txnInnerHTML(t, showDate) {
 }
 function makeTxnDiv(t, showDate, withHandle) {
   const div = document.createElement('div');
-  div.className = 'txn' + (t.id === window._flashId ? ' flash' : '');
+  div.className = 'txn' + (t.id === window._flashId ? ' flash' : '') + (selectMode && selectedIds.has(t.id) ? ' selected' : '');
   div.dataset.id = t.id;
+  if (selectMode) {
+    const checked = selectedIds.has(t.id) ? 'checked' : '';
+    div.innerHTML = `<label class="sel-check"><input type="checkbox" ${checked} onchange="onRowSelect('${t.id}',this.checked)"></label>` + txnInnerHTML(t, showDate);
+    return div;
+  }
   const ctrl = withHandle
     ? '<div class="move-ctrl">' +
       `<button class="btn btn-sm move-btn" title="上移一格" aria-label="上移" onclick="moveTxn('${t.id}',-1)">▲</button>` +
@@ -1720,6 +1916,7 @@ function enableRowReorder(listEl) {
 
 function renderTxns() {
   const host = document.getElementById('txn-list');
+  host.classList.toggle('selecting', selectMode);
   host.innerHTML = '';
   let txns = [...data.txns];
   if (filter !== 'all') txns = txns.filter(t => t.type === filter);
@@ -1734,16 +1931,18 @@ function renderTxns() {
 
   // 自訂順序（手動拖曳）→ 依 data.txns 陣列順序，平鋪、每筆可拖曳
   if (sortMode === 'manual') {
-    const tip = document.createElement('div');
-    tip.className = 'hint';
-    tip.style.cssText = 'margin:-2px 4px 8px';
-    tip.textContent = '✋ 自訂模式：按住每筆左側 ⠿ 拖曳，或點 ▲ ▼ 上下移動，皆可排序；順序會自動記住。';
-    host.appendChild(tip);
+    if (!selectMode) {   // 選取模式下無拖曳把手，提示會誤導 → 不顯示，也不綁拖曳
+      const tip = document.createElement('div');
+      tip.className = 'hint';
+      tip.style.cssText = 'margin:-2px 4px 8px';
+      tip.textContent = '✋ 自訂模式：按住每筆左側 ⠿ 拖曳，或點 ▲ ▼ 上下移動，皆可排序；順序會自動記住。';
+      host.appendChild(tip);
+    }
     const list = document.createElement('div');
     list.className = 'txn-list';
     for (const t of txns) list.appendChild(makeTxnDiv(t, true, true));
     host.appendChild(list);
-    enableRowReorder(list);
+    if (!selectMode) enableRowReorder(list);
     window._flashId = null;
     return;
   }
@@ -1823,6 +2022,8 @@ function onTypeChange() {
   document.getElementById('amt-label').textContent = type === 'topup' ? '轉出金額' : '金額';
   if (type === 'topup') updateToAmtField();
   updatePreview();
+  const feeOn = document.getElementById('f-fee-on');
+  if (feeOn && feeOn.checked) refreshFeeSelects(); // 切換型態時更新手續費預設扣款帳戶
 }
 function onTopupAcctChange() { toamtTouched = false; updateToAmtField(); updatePreview(); }
 function updateToAmtField() {
@@ -1896,7 +2097,23 @@ function submitForm(event) {
   } else {
     txn.id = genId(); data.txns.push(txn);
     window._flashId = txn.id;
-    toast('已新增 ✅');
+    // 手續費（獨立 expense；僅新增、不在編輯時）
+    const feeOnEl = document.getElementById('f-fee-on');
+    const feeAmt = Number(document.getElementById('f-fee-amount').value);
+    if (feeOnEl && feeOnEl.checked && Number.isFinite(feeAmt) && feeAmt > 0) {
+      const feeAcct = document.getElementById('f-fee-account').value;
+      if (feeAcct && acctById(feeAcct)) {
+        ensureFeeCategory();
+        let baseLabel;
+        if (type === 'expense') baseLabel = txn.item;
+        else { const fa = acctById(txn.from), ta = acctById(txn.to); baseLabel = (fa ? fa.name : '?') + '→' + (ta ? ta.name : '?'); }
+        const fee = buildFeeTxn({ date, account: feeAcct, type: document.getElementById('f-fee-type').value, amount: feeAmt, baseLabel });
+        fee.id = genId(); data.txns.push(fee);
+        toast('已新增（含手續費）✅');
+      } else { toast('已新增 ✅（手續費未選扣款帳戶，略過）'); }
+    } else {
+      toast('已新增 ✅');
+    }
   }
   save();
   render();
@@ -1912,6 +2129,7 @@ function resetFormKeepDate() {
   document.getElementById('f-toamount').value = '';
   toamtTouched = false;
   document.getElementById('amt-preview').textContent = '';
+  resetFeeBlock();
   if (getType() === 'expense') document.getElementById('f-item').focus();
 }
 
@@ -1939,9 +2157,11 @@ function fillForm(t) {
 function startEdit(id) {
   const t = data.txns.find(x => x.id === id);
   if (!t) return;
+  forceSingleEntryMode();      // 編輯僅限單筆模式
   editingId = id;
   expandForm();
   fillForm(t);
+  showFeeBlock(false);         // 編輯既有記錄不連動手續費 → 隱藏（獨立模型）
   document.getElementById('form-mode-title').textContent = '編輯記錄';
   document.getElementById('f-submit').textContent = '儲存修改';
   document.getElementById('f-cancel').style.display = '';
@@ -1949,9 +2169,11 @@ function startEdit(id) {
 function duplicate(id) {
   const t = data.txns.find(x => x.id === id);
   if (!t) return;
+  forceSingleEntryMode();
   editingId = null;            // 視為「新增」，不覆蓋原本那筆
   expandForm();
   fillForm(t);
+  showFeeBlock(true);
   document.getElementById('form-mode-title').textContent = '新增記錄（已複製，改完按新增）';
   document.getElementById('f-submit').textContent = '新增';
   document.getElementById('f-cancel').style.display = '';
@@ -1962,6 +2184,7 @@ function cancelEdit() {
   document.getElementById('form-mode-title').textContent = '新增記錄';
   document.getElementById('f-submit').textContent = '新增';
   document.getElementById('f-cancel').style.display = 'none';
+  showFeeBlock(true);          // 取消編輯回到新增 → 手續費區塊恢復可見
   resetFormKeepDate();
 }
 function del(id) {
@@ -2142,7 +2365,10 @@ function saveSettings() {
   const cats = parseCats(document.getElementById('s-cats').value);
   if (Object.keys(cats).length) data.categories = cats;
   try { localStorage.setItem('jp_split_enabled', document.getElementById('s-split-enabled').checked ? '1' : '0'); } catch (e) {}
-  save(); refreshSelects(); render(); closeSettings();
+  save(); refreshSelects(); render();
+  if (entryMode === 'multi') renderMultiRows();                                  // 帳戶/分類變更同步多列下拉
+  const feeOnEl = document.getElementById('f-fee-on'); if (feeOnEl && feeOnEl.checked) refreshFeeSelects();
+  closeSettings();
   toast('設定已儲存 ✅');
 }
 
@@ -2186,6 +2412,8 @@ function sanitizeImport(d) {
   });
   if (!Array.isArray(d.members)) d.members = [];
   if (!Array.isArray(d.splits)) d.splits = [];
+  if (!d.categories || typeof d.categories !== 'object') d.categories = defaultData().categories;
+  if (!Array.isArray(d.categories[FEE_CAT]) || !d.categories[FEE_CAT].length) d.categories[FEE_CAT] = DEFAULT_FEE_TYPES.slice(); // 對齊 load() 手續費分類遷移（匯入/還原皆走此）
   normalizeSplitData(d);          // 必修B：分帳資料同步淨化（標 _needsReview / _rateUnknown）
   d.schemaVersion = 2;
   return d;
@@ -2205,6 +2433,7 @@ function importJSON(e) {
       data = sanitizeImport(d);
       if (!data.categories) data.categories = defaultData().categories;
       clearSplitUndo(); // N1-a：換資料集前清分帳 undo 緩衝，杜絕舊 split 注入新帳本
+      exitSelectMode(); // 換資料集前退出選取模式，清過期 selectedIds
       save(); refreshSelects(); render(); closeSettings();
       toast('匯入成功 ✅（如需復原請到 設定 → 還原上次自動備份）');
     } catch (err) { toast('匯入失敗：' + err.message); }
@@ -2222,6 +2451,7 @@ function restoreAutobak() {
   const cur = JSON.stringify(data); // 還原前先留存目前資料，讓還原可逆
   data = sanitizeImport(d);
   clearSplitUndo(); // N1-a：還原前清分帳 undo 緩衝
+  exitSelectMode(); // 換資料集前退出選取模式，清過期 selectedIds
   if (!data.categories) data.categories = defaultData().categories;
   try { localStorage.setItem('jp_trip_ledger_v2_autobak', cur); } catch (e) {}
   save(); refreshSelects(); render(); closeSettings();
@@ -2246,7 +2476,7 @@ function exportCSV() {
 function clearAll() {
   if (!confirm('⚠️ 這會清除所有記錄與設定，回到初始狀態。建議先匯出備份。確定清除？')) return;
   if (!confirm('再次確認：真的要清除全部嗎？')) return;
-  data = defaultData(); clearSplitUndo(); save(); refreshSelects(); render(); closeSettings();
+  data = defaultData(); clearSplitUndo(); exitSelectMode(); save(); refreshSelects(); render(); closeSettings();
 }
 
 /* ===================== 工具 ===================== */
@@ -2275,6 +2505,7 @@ function toast(msg) {
 document.getElementById('settings-modal').addEventListener('click', e => { if (e.target.id === 'settings-modal') closeSettings(); });
 document.getElementById('analysis-modal').addEventListener('click', e => { if (e.target.id === 'analysis-modal') closeAnalysis(); });
 document.getElementById('summary-modal').addEventListener('click', e => { if (e.target.id === 'summary-modal') closeSummary(); });
+document.getElementById('batch-modal').addEventListener('click', e => { if (e.target.id === 'batch-modal') closeBatchModal(); });
 // 列印隔離：總結卡開啟時才讓 @media print（全綁 body.sum-printing）生效。三路覆蓋並自癒還原：
 //  ① 按鈕 printSummary() 同步加 class（跨平台保證，見該函式）
 //  ② 桌面 Chrome/Firefox：beforeprint/afterprint
@@ -2295,7 +2526,8 @@ document.addEventListener('click', closeAllOps);
 /* Esc 關閉最上層 modal；Android 返回鍵（popstate）關閉分析面板 */
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (document.getElementById('summary-modal').classList.contains('show')) closeSummary();
+  if (document.getElementById('batch-modal').classList.contains('show')) closeBatchModal();
+  else if (document.getElementById('summary-modal').classList.contains('show')) closeSummary();
   else if (document.getElementById('analysis-modal').classList.contains('show')) closeAnalysis();
   else if (document.getElementById('settings-modal').classList.contains('show')) closeSettings();
 });
@@ -2308,8 +2540,14 @@ document.getElementById('analysis-modal').addEventListener('click', e => {
   const el = e.target.closest && e.target.closest('[data-drill]');
   if (el) renderDrilldown(chartMode, decodeURIComponent(el.dataset.drill));
 });
-/* 單筆點內容區（.mid）展開看全文；自訂排序模式停用，避免和拖曳搶手勢 */
+/* 單筆點內容區（.mid）展開看全文；選取模式＝點列切換選取；自訂排序模式停用展開避免和拖曳搶手勢 */
 document.getElementById('txn-list').addEventListener('click', e => {
+  if (selectMode) {
+    if (e.target.closest('.sel-check')) return;      // 勾選框自身的 change 已處理
+    const row = e.target.closest('.txn');
+    if (row && row.dataset.id) toggleRowSelect(row.dataset.id);
+    return;
+  }
   if (sortMode === 'manual') return;
   const mid = e.target.closest && e.target.closest('.mid');
   if (!mid) return;
@@ -2711,6 +2949,312 @@ function saveSplitForm() {
 document.getElementById('split-modal').addEventListener('click', e => { if (e.target.id === 'split-modal') closeSplitForm(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('split-modal').classList.contains('show')) closeSplitForm(); });
 
+/* ===================== 手續費 UI ===================== */
+function ensureFeeCategory() {
+  if (!data.categories[FEE_CAT] || !Array.isArray(data.categories[FEE_CAT]) || !data.categories[FEE_CAT].length)
+    data.categories[FEE_CAT] = DEFAULT_FEE_TYPES.slice();
+}
+function feeTypes() {
+  const list = data.categories && data.categories[FEE_CAT];
+  return (Array.isArray(list) && list.length) ? list : DEFAULT_FEE_TYPES;
+}
+function showFeeBlock(show) {
+  const b = document.getElementById('fee-block');
+  if (b) b.style.display = show ? '' : 'none';
+  if (!show) resetFeeBlock();
+}
+function resetFeeBlock() {
+  const on = document.getElementById('f-fee-on'); if (on) on.checked = false;
+  const ff = document.getElementById('fee-fields'); if (ff) ff.style.display = 'none';
+  const fa = document.getElementById('f-fee-amount'); if (fa) fa.value = '';
+  const fp = document.getElementById('fee-preview'); if (fp) fp.textContent = '';
+}
+function onFeeToggle() {
+  const on = document.getElementById('f-fee-on').checked;
+  document.getElementById('fee-fields').style.display = on ? '' : 'none';
+  if (on) { refreshFeeSelects(); updateFeePreview(); document.getElementById('f-fee-amount').focus(); }
+}
+function refreshFeeSelects() {
+  const sel = document.getElementById('f-fee-account');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = data.accounts.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}（${escapeHtml(a.currency)}）</option>`).join('');
+  const def = getType() === 'expense' ? document.getElementById('f-account').value : document.getElementById('f-from').value;
+  if (cur && data.accounts.some(a => a.id === cur)) sel.value = cur;
+  else if (def && data.accounts.some(a => a.id === def)) sel.value = def;
+  const tsel = document.getElementById('f-fee-type');
+  const tcur = tsel.value;
+  const types = feeTypes();
+  tsel.innerHTML = types.map(t => `<option>${escapeHtml(t)}</option>`).join('');
+  if (tcur && types.includes(tcur)) tsel.value = tcur;
+}
+function updateFeePreview() {
+  const a = acctById(document.getElementById('f-fee-account').value);
+  const amt = Number(document.getElementById('f-fee-amount').value) || 0;
+  const prev = document.getElementById('fee-preview');
+  if (!a || !amt) { prev.textContent = ''; return; }
+  prev.textContent = a.currency === 'TWD'
+    ? `≒ ¥${Math.round(toJPY(amt, 'TWD')).toLocaleString('en-US')}`
+    : `≒ NT$${Math.round(toTWD(amt, 'JPY')).toLocaleString('en-US')}`;
+}
+
+/* ===================== 新增表單模式（單筆 / 多列）===================== */
+function forceSingleEntryMode() {
+  entryMode = 'single';
+  const r = document.querySelector('input[name="entrymode"][value="single"]'); if (r) r.checked = true;
+  const ef = document.getElementById('entry-form'); if (ef) ef.style.display = '';
+  const me = document.getElementById('multi-entry'); if (me) me.style.display = 'none';
+}
+function setEntryMode(m) {
+  entryMode = (m === 'multi') ? 'multi' : 'single';
+  if (entryMode === 'multi' && editingId) cancelEdit();   // 多列＝純新增，先離開編輯
+  document.getElementById('entry-form').style.display = entryMode === 'multi' ? 'none' : '';
+  document.getElementById('multi-entry').style.display = entryMode === 'multi' ? '' : 'none';
+  if (entryMode === 'multi') {
+    expandForm();
+    if (multiRows.length === 0) multiRows = [emptyMultiRow(), emptyMultiRow(), emptyMultiRow()];
+    renderMultiRows();
+  }
+}
+function emptyMultiRow() {
+  return { date: today(), account: data.accounts[0] ? data.accounts[0].id : '', cat: Object.keys(data.categories)[0] || '', subcat: '', item: '', amount: '' };
+}
+function addMultiRow() { multiRows.push(emptyMultiRow()); renderMultiRows(); }
+function removeMultiRow(i) { multiRows.splice(i, 1); if (multiRows.length === 0) multiRows.push(emptyMultiRow()); renderMultiRows(); }
+function onMultiInput(i, field, val) { if (multiRows[i]) multiRows[i][field] = val; }
+function onMultiCat(i, val) {
+  if (multiRows[i]) multiRows[i].cat = val;
+  const dl = document.getElementById('msub-' + i);
+  if (dl) dl.innerHTML = (data.categories[val] || []).map(s => `<option value="${escapeHtml(s)}">`).join('');
+}
+function renderMultiRows() {
+  const host = document.getElementById('multi-rows');
+  if (!host) return;
+  const acctOpts = id => data.accounts.map(a => `<option value="${escapeHtml(a.id)}" ${a.id === id ? 'selected' : ''}>${escapeHtml(a.name)}（${escapeHtml(a.currency)}）</option>`).join('');
+  const catOpts = c => Object.keys(data.categories).map(k => `<option ${k === c ? 'selected' : ''}>${escapeHtml(k)}</option>`).join('') + `<option value="" ${c === '' ? 'selected' : ''}>（不分類）</option>`;
+  host.innerHTML = multiRows.map((r, i) => {
+    const subs = (data.categories[r.cat] || []).map(s => `<option value="${escapeHtml(s)}">`).join('');
+    return `<div class="multi-row" data-i="${i}">` +
+      `<input type="date" value="${escapeHtml(r.date)}" onchange="onMultiInput(${i},'date',this.value)" aria-label="日期">` +
+      `<select onchange="onMultiInput(${i},'account',this.value)" aria-label="支付帳戶">${acctOpts(r.account)}</select>` +
+      `<select onchange="onMultiCat(${i},this.value)" aria-label="大項">${catOpts(r.cat)}</select>` +
+      `<input type="text" value="${escapeHtml(r.subcat)}" list="msub-${i}" placeholder="小項" oninput="onMultiInput(${i},'subcat',this.value)" aria-label="小項"><datalist id="msub-${i}">${subs}</datalist>` +
+      `<input type="text" value="${escapeHtml(r.item)}" placeholder="品項/名稱" oninput="onMultiInput(${i},'item',this.value)" aria-label="品項">` +
+      `<input type="number" inputmode="decimal" step="any" value="${escapeHtml(r.amount)}" placeholder="金額" oninput="onMultiInput(${i},'amount',this.value)" aria-label="金額">` +
+      `<button type="button" class="btn btn-sm btn-danger multi-del" onclick="removeMultiRow(${i})" aria-label="移除這列">✕</button>` +
+    `</div>`;
+  }).join('');
+}
+function submitMulti() {
+  const ids = new Set(data.accounts.map(a => a.id));
+  const res = parseMultiRowEntries(multiRows, ids);
+  document.querySelectorAll('#multi-rows .multi-row').forEach(el => el.classList.remove('bad'));
+  if (res.errors.length) {
+    res.errors.forEach(e => { const el = document.querySelector(`#multi-rows .multi-row[data-i="${e.i}"]`); if (el) el.classList.add('bad'); });
+    const first = res.errors[0];
+    toast(`第 ${first.i + 1} 列：${first.msg}${res.errors.length > 1 ? `（共 ${res.errors.length} 列待修正）` : ''}`);
+    return;
+  }
+  if (res.valid.length === 0) { toast('沒有可送出的資料，請至少填一列'); return; }
+  for (const t of res.valid) { t.id = genId(); data.txns.push(t); }
+  window._flashId = res.valid[res.valid.length - 1].id;
+  save(); render();
+  multiRows = [emptyMultiRow(), emptyMultiRow(), emptyMultiRow()];
+  renderMultiRows();
+  toast(`已新增 ${res.valid.length} 筆`);
+}
+
+/* ===================== 選取模式 + 批量編輯 ===================== */
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  selectedIds.clear();
+  closeAllOps();
+  const btn = document.getElementById('select-toggle');
+  if (btn) { btn.textContent = selectMode ? '✕ 取消選取' : '☑️ 選取'; btn.classList.toggle('active', selectMode); }
+  renderTxns();
+  renderBatchBar();
+}
+function selectedTxns() { return data.txns.filter(t => selectedIds.has(t.id)); }
+function onRowSelect(id, checked) {
+  if (checked) selectedIds.add(id); else selectedIds.delete(id);
+  const row = document.querySelector('#txn-list .txn[data-id="' + id + '"]');
+  if (row) row.classList.toggle('selected', checked);
+  renderBatchBar();
+}
+function toggleRowSelect(id) {
+  const checked = !selectedIds.has(id);
+  if (checked) selectedIds.add(id); else selectedIds.delete(id);
+  const row = document.querySelector('#txn-list .txn[data-id="' + id + '"]');
+  if (row) { const cb = row.querySelector('.sel-check input'); if (cb) cb.checked = checked; row.classList.toggle('selected', checked); }
+  renderBatchBar();
+}
+function clearSelection() { selectedIds.clear(); renderTxns(); renderBatchBar(); }
+// 換掉整個 data（匯入/還原/清除）時呼叫：徹底退出選取模式並清暫態，避免殘留過期 selectedIds
+function exitSelectMode() {
+  selectMode = false;
+  selectedIds.clear();
+  const btn = document.getElementById('select-toggle');
+  if (btn) { btn.textContent = '☑️ 選取'; btn.classList.remove('active'); }
+  renderBatchBar();
+}
+function renderBatchBar() {
+  const bar = document.getElementById('batch-bar');
+  if (!bar) return;
+  if (!selectMode || selectedIds.size === 0) {
+    bar.className = 'batch-bar'; bar.innerHTML = '';
+    document.body.classList.remove('has-batch-bar');
+    return;
+  }
+  const sel = selectedTxns();
+  const allExpense = sel.length > 0 && sel.every(t => t.type === 'expense');
+  const allTopup = sel.length > 0 && sel.every(t => t.type === 'topup');
+  let btns = `<button class="btn btn-sm" onclick="batchSetDate()">改日期</button>`;
+  if (allExpense) {
+    btns += `<button class="btn btn-sm" onclick="batchSetAccount()">改帳戶</button>`;
+    btns += `<button class="btn btn-sm" onclick="batchSetCategory()">改分類</button>`;
+  } else if (allTopup) {
+    btns += `<button class="btn btn-sm" onclick="batchSetTopupAcct('from')">改扣款</button>`;
+    btns += `<button class="btn btn-sm" onclick="batchSetTopupAcct('to')">改入賬</button>`;
+    btns += `<button class="btn btn-sm" onclick="batchSwapTopup()">對調方向</button>`;
+  }
+  btns += `<button class="btn btn-sm btn-danger" onclick="batchDelete()">刪除</button>`;
+  bar.innerHTML = `<span class="bb-count">已選 ${selectedIds.size} 筆</span>${btns}` +
+    `<span style="flex:1"></span><button class="btn btn-sm" onclick="clearSelection()">完成</button>`;
+  bar.className = 'batch-bar show';
+  document.body.classList.add('has-batch-bar');
+}
+
+/* —— 批量通用 modal —— */
+function openBatchModal(title, bodyHTML, applyFn, okText) {
+  document.getElementById('batch-modal-title').textContent = title;
+  document.getElementById('batch-modal-body').innerHTML = bodyHTML;
+  document.getElementById('batch-modal-ok').textContent = okText || '套用';
+  _batchModalApply = applyFn;
+  document.getElementById('batch-modal').classList.add('show');
+}
+function closeBatchModal() {
+  document.getElementById('batch-modal').classList.remove('show');
+  _batchModalApply = null;
+}
+function confirmBatchModal() {
+  if (_batchModalApply) { const r = _batchModalApply(); if (r === false) return; } // 回 false＝驗證未過，保持開啟
+  closeBatchModal();
+}
+
+/* —— 各批量操作 —— */
+function batchSetDate() {
+  if (!selectedIds.size) return;
+  const body = `<div class="field"><label>新日期（套用到已選 ${selectedIds.size} 筆）</label><input type="date" id="batch-date" value="${today()}"></div>`;
+  openBatchModal('批量改日期', body, () => {
+    const d = document.getElementById('batch-date').value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { toast('請選擇有效日期'); return false; }
+    let n = 0;
+    for (const t of data.txns) if (selectedIds.has(t.id)) { t.date = d; n++; }
+    save(); render(); renderBatchBar(); toast(`已改 ${n} 筆日期`);
+  });
+}
+function batchSetAccount() {
+  const sel = selectedTxns();
+  if (!sel.length || !sel.every(t => t.type === 'expense')) return;
+  const opts = data.accounts.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}（${escapeHtml(a.currency)}）</option>`).join('');
+  const body = `<div class="field"><label>改成支付帳戶（已選 ${sel.length} 筆消費）</label><select id="batch-acct">${opts}</select></div>` +
+    `<div class="field" id="batch-conv-wrap" style="display:none"><label>跨幣別時金額怎麼處理？</label>` +
+    `<div class="seg-mini"><label><input type="radio" name="batchconv" value="keep" checked><span>保持原數字</span></label>` +
+    `<label><input type="radio" name="batchconv" value="convert"><span>依匯率換算</span></label></div>` +
+    `<div class="hint" style="margin-top:6px">部分已選筆與新帳戶幣別不同，換算用目前匯率（1 台幣 ≒ ¥${data.rate}）。</div></div>`;
+  openBatchModal('批量改支付帳戶', body, () => {
+    const newId = document.getElementById('batch-acct').value;
+    const na = acctById(newId);
+    if (!na) { toast('請選擇帳戶'); return false; }
+    const modeEl = document.querySelector('input[name="batchconv"]:checked');
+    const mode = modeEl ? modeEl.value : 'keep';
+    let n = 0;
+    for (const t of data.txns) {
+      if (!selectedIds.has(t.id) || t.type !== 'expense') continue;
+      const oa = acctById(t.account); const oldCur = oa ? oa.currency : 'JPY';
+      let v = convertAmountOnAccountChange(t.amount, oldCur, na.currency, data.rate, mode);
+      if (mode === 'convert' && oldCur !== na.currency) v = Math.round(v);
+      t.amount = v; t.account = newId; n++;
+    }
+    save(); render(); renderBatchBar(); toast(`已改 ${n} 筆帳戶`);
+  });
+  setTimeout(() => {
+    const s = document.getElementById('batch-acct');
+    const upd = () => {
+      const na = acctById(s.value);
+      const wrap = document.getElementById('batch-conv-wrap');
+      const cross = sel.some(t => { const oa = acctById(t.account); return oa && na && oa.currency !== na.currency; });
+      if (wrap) wrap.style.display = cross ? '' : 'none';
+    };
+    if (s) { s.addEventListener('change', upd); upd(); }
+  }, 0);
+}
+function batchSetCategory() {
+  const sel = selectedTxns();
+  if (!sel.length || !sel.every(t => t.type === 'expense')) return;
+  const catOpts = Object.keys(data.categories).map(c => `<option>${escapeHtml(c)}</option>`).join('') + '<option value="">（不分類）</option>';
+  const body = `<div class="field"><label>大項（已選 ${sel.length} 筆）</label><select id="batch-cat" onchange="batchUpdateSubList()">${catOpts}</select></div>` +
+    `<div class="field"><label>小項（留空＝清空小項）</label><input type="text" id="batch-subcat" list="batch-sub-list" placeholder="例：電鐵"><datalist id="batch-sub-list"></datalist></div>` +
+    `<div class="hint">套用後會覆蓋已選筆的大項與小項。</div>`;
+  openBatchModal('批量改分類', body, () => {
+    const cat = document.getElementById('batch-cat').value;
+    const subcat = document.getElementById('batch-subcat').value.trim();
+    let n = 0;
+    for (const t of data.txns) if (selectedIds.has(t.id) && t.type === 'expense') { t.cat = cat; t.subcat = subcat; n++; }
+    save(); render(); renderBatchBar(); toast(`已改 ${n} 筆分類`);
+  });
+  setTimeout(batchUpdateSubList, 0);
+}
+function batchUpdateSubList() {
+  const cat = document.getElementById('batch-cat'); if (!cat) return;
+  const subs = data.categories[cat.value] || [];
+  const dl = document.getElementById('batch-sub-list');
+  if (dl) dl.innerHTML = subs.map(s => `<option value="${escapeHtml(s)}">`).join('');
+}
+function batchSetTopupAcct(field) {
+  const sel = selectedTxns();
+  if (!sel.length || !sel.every(t => t.type === 'topup')) return;
+  const label = field === 'from' ? '扣款帳戶' : '入賬帳戶';
+  const opts = data.accounts.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}（${escapeHtml(a.currency)}）</option>`).join('');
+  const body = `<div class="field"><label>改成${label}（已選 ${sel.length} 筆轉帳）</label><select id="batch-topup-acct">${opts}</select></div>` +
+    `<div class="hint">若改完會和另一端相同的筆會被略過（轉帳兩端不可相同）。</div>`;
+  openBatchModal(`批量改${label}`, body, () => {
+    const newId = document.getElementById('batch-topup-acct').value;
+    if (!acctById(newId)) { toast('請選擇帳戶'); return false; }
+    let n = 0, skip = 0;
+    for (const t of data.txns) {
+      if (!selectedIds.has(t.id) || t.type !== 'topup') continue;
+      const other = field === 'from' ? t.to : t.from;
+      if (other === newId) { skip++; continue; }
+      t[field] = newId; n++;
+    }
+    save(); render(); renderBatchBar(); toast(`已改 ${n} 筆${skip ? `（略過 ${skip} 筆同帳戶）` : ''}`);
+  });
+}
+function batchSwapTopup() {
+  const sel = selectedTxns();
+  if (!sel.length || !sel.every(t => t.type === 'topup')) return;
+  let n = 0;
+  for (const t of data.txns) {
+    if (!selectedIds.has(t.id) || t.type !== 'topup') continue;
+    const sw = swapTopupDirection(t);
+    t.from = sw.from; t.to = sw.to; t.amount = sw.amount; t.toAmount = sw.toAmount; n++;
+  }
+  save(); render(); renderBatchBar(); toast(`已對調 ${n} 筆轉帳方向`);
+}
+function batchDelete() {
+  const n = selectedIds.size;
+  if (!n) return;
+  const body = `<div class="hint" style="font-size:14px;color:var(--text);line-height:1.7">確定刪除已選的 <b>${n}</b> 筆記錄？<br>此動作無法復原，建議先到「⚙️ 設定」匯出備份。</div>`;
+  openBatchModal('批量刪除', body, () => {
+    const ids = new Set(selectedIds);
+    data.txns = data.txns.filter(t => !ids.has(t.id));
+    selectedIds.clear();
+    if (editingId && !data.txns.some(t => t.id === editingId)) cancelEdit();
+    save(); render(); renderBatchBar(); toast(`已刪除 ${n} 筆`);
+  }, '確定刪除');
+}
+
 /* ===================== 啟動 ===================== */
 document.getElementById('f-date').value = today();
 refreshSelects();
@@ -2719,12 +3263,16 @@ render();
 applyFormCollapsed();
 refreshSplitPayer();
 
-/* ?test=1：分帳核心自測硬 gate（與終端 split-core.test.js 同一份 23 案）*/
+/* ?test=1：核心自測硬 gate（分帳 23 案 + 手續費/批量/多列 案）*/
 try {
   if (location.search.indexOf('test=1') >= 0) {
     const tr = runSplitSelfTest();
-    if (tr.fail > 0) { console.error('分帳自測 FAIL', tr.fails); toast('⚠️ 分帳自測失敗：\n' + tr.fails.join('\n')); }
-    else { console.log('分帳自測 PASS ' + tr.pass + ' / FAIL 0'); toast('✅ 分帳自測全數通過（' + tr.pass + ' 案）'); }
+    const tr2 = runBatchFeeSelfTest();
+    const fail = tr.fail + tr2.fail;
+    const fails = tr.fails.concat(tr2.fails);
+    const pass = tr.pass + tr2.pass;
+    if (fail > 0) { console.error('自測 FAIL', fails); toast('⚠️ 自測失敗：\n' + fails.join('\n')); }
+    else { console.log('自測 PASS ' + pass + ' / FAIL 0'); toast('✅ 自測全數通過（' + pass + ' 案）'); }
   }
 } catch (e) { console.error(e); }
 
