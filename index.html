@@ -212,6 +212,12 @@
   .drill-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
   .drill-head .drill-title { font-size:13px; color:var(--muted); }
   .drill-head .drill-title b { color:var(--text); }
+  .drill-cat-head { display:flex; align-items:center; justify-content:space-between; gap:8px;
+    margin:14px 0 6px; padding:6px 2px 7px; border-bottom:1px solid var(--line); }
+  .drill-cat-head:first-child { margin-top:0; }
+  .drill-cat-name { font-weight:700; font-size:14px; display:flex; align-items:center; gap:6px; }
+  .drill-cat-sum { font-size:13px; color:var(--muted); white-space:nowrap; }
+  .drill-cat-sum b { color:var(--text); }
   #analysis-body .leg-row { cursor:pointer; border-radius:8px; }
   #analysis-body .leg-row:hover { background:var(--panel2); }
   #analysis-body .pie path, #analysis-body .pie circle { cursor:pointer; }
@@ -1925,6 +1931,17 @@ function drillRowHTML(t) {
     `<div class="twd conv">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div></div>` +
     `<button class="si-edit" style="align-self:center;margin-left:8px" onclick="startInlineEdit('${t.id}','drill')" aria-label="修改這筆">✏️</button></div>`;
 }
+// 將「已解析台幣值的鑽取列」依大分類分組小計；組依小計大→小，組內維持傳入順序（＝日期新→舊）
+function groupByCatCore(rows) {           // rows: [{ t, cat, twd }]
+  const m = {};
+  for (const r of rows) {
+    const cat = r.cat || '未分類';
+    if (!m[cat]) m[cat] = { cat, rows: [], sum: 0 };
+    m[cat].rows.push(r);
+    m[cat].sum += r.twd;
+  }
+  return Object.values(m).sort((x, y) => y.sum - x.sum);
+}
 function renderDrilldown(mode, key) {
   _drillCtx = { mode, key };
   const body = document.getElementById('analysis-body');
@@ -1934,9 +1951,20 @@ function renderDrilldown(mode, key) {
   for (const t of list) { const a = acctById(t.account); if (a) sum += toTWD(Number(t.amount) || 0, a.currency); }
   let html = `<div class="drill-head"><button class="btn btn-sm" onclick="renderAnalysisPanel()">← 返回分析</button>` +
     `<span class="drill-title">${escapeHtml(drillLabel(mode, key))}　<b>${list.length} 筆</b>　${fmt(sum, 'TWD')}</span></div>`;
-  html += list.length
-    ? `<div class="txn-list">${list.map(drillRowHTML).join('')}</div>`
-    : '<div class="empty">沒有符合的記錄。</div>';
+  if (!list.length) { html += '<div class="empty">沒有符合的記錄。</div>'; body.innerHTML = html; return; }
+  if (mode === 'pay') {                     // 支付方式：依大分類分組＋每組小計（其餘視圖維持平鋪）
+    const rows = list.map(t => { const a = acctById(t.account);
+      return { t, cat: t.cat || '未分類', twd: toTWD(Number(t.amount) || 0, a ? a.currency : 'JPY') }; });
+    const groups = groupByCatCore(rows);
+    html += `<div class="txn-list">` + groups.map(g =>
+      `<div class="drill-cat-head"><span class="drill-cat-name">` +
+        `<span class="chk-dot" style="background:${colorForKey(g.cat)}"></span>${escapeHtml(g.cat)}</span>` +
+      `<span class="drill-cat-sum"><b>${g.rows.length}</b> 筆　${fmt(g.sum, 'TWD')}</span></div>` +
+      g.rows.map(r => drillRowHTML(r.t)).join('')
+    ).join('') + `</div>`;
+  } else {
+    html += `<div class="txn-list">${list.map(drillRowHTML).join('')}</div>`;
+  }
   body.innerHTML = html;
 }
 
@@ -3446,14 +3474,30 @@ render();
 applyFormCollapsed();
 refreshSplitPayer();
 
-/* ?test=1：核心自測硬 gate（分帳 23 案 + 手續費/批量/多列 案）*/
+// ?test=1 自測（支付方式鑽取分組小計 純函式）
+function runDrillGroupSelfTest() {
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (c, n) => { if (c) pass++; else { fail++; fails.push(n); } };
+  const g = groupByCatCore([
+    { cat: '飲食', twd: 100 }, { cat: '交通', twd: 500 }, { cat: '飲食', twd: 200 }, { cat: '', twd: 50 }
+  ]);
+  ok(g.length === 3, '分 3 組');
+  ok(g[0].cat === '交通' && g[0].sum === 500, '第一組=交通（小計大→小）');
+  ok(g[1].cat === '飲食' && g[1].sum === 300 && g[1].rows.length === 2, '飲食合併=300 / 2 筆');
+  ok(g[2].cat === '未分類' && g[2].sum === 50, '空 cat→未分類');
+  ok(g.reduce((s, x) => s + x.sum, 0) === 850, '各組小計加總=輸入總和');
+  ok(groupByCatCore([]).length === 0, '空輸入→空陣列');
+  return { pass, fail, fails };
+}
+/* ?test=1：核心自測硬 gate（分帳 23 案 + 手續費/批量/多列 案 + 支付分組案）*/
 try {
   if (location.search.indexOf('test=1') >= 0) {
     const tr = runSplitSelfTest();
     const tr2 = runBatchFeeSelfTest();
-    const fail = tr.fail + tr2.fail;
-    const fails = tr.fails.concat(tr2.fails);
-    const pass = tr.pass + tr2.pass;
+    const tr3 = runDrillGroupSelfTest();
+    const fail = tr.fail + tr2.fail + tr3.fail;
+    const fails = tr.fails.concat(tr2.fails, tr3.fails);
+    const pass = tr.pass + tr2.pass + tr3.pass;
     if (fail > 0) { console.error('自測 FAIL', fails); toast('⚠️ 自測失敗：\n' + fails.join('\n')); }
     else { console.log('自測 PASS ' + pass + ' / FAIL 0'); toast('✅ 自測全數通過（' + pass + ' 案）'); }
   }
