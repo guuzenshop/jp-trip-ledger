@@ -314,6 +314,35 @@
   .sum-table td.num, .sum-table th.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .sum-bar { height:5px; border-radius:3px; background:var(--green); margin-top:5px; min-width:3px; }
   .sum-foot { font-size:11px; color:var(--muted); margin-top:16px; text-align:center; }
+  /* 需求1：支出金額紅色（螢幕；列印另有覆蓋）*/
+  .sum-neg { color:var(--red); }
+  /* 需求2：消費明細區塊（逐筆 + 可勾選是否入鏡 + 可 inline 編輯）*/
+  .sum-items { display:flex; flex-direction:column; gap:7px; }
+  .sum-item { display:flex; align-items:flex-start; gap:9px; background:var(--panel2); border:1px solid var(--line);
+    border-radius:10px; padding:9px 11px; font-size:13px; }
+  .sum-item.hidden-item { opacity:.4; }
+  .sum-item .si-chk { width:17px; height:17px; flex-shrink:0; margin-top:1px; cursor:pointer; }
+  .sum-item .si-main { flex:1; min-width:0; }
+  .sum-item .si-name { font-weight:600; word-break:break-word; }
+  .sum-item .si-meta { font-size:11px; color:var(--muted); margin-top:2px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .sum-item .si-amt { text-align:right; flex-shrink:0; font-weight:700; white-space:nowrap; }
+  .sum-item .si-edit { background:transparent; border:1px solid var(--line); color:var(--muted); border-radius:8px;
+    padding:3px 8px; font-size:12px; cursor:pointer; flex-shrink:0; align-self:center; }
+  .sum-item .si-edit:hover { color:var(--text); border-color:var(--muted); }
+  /* 需求3：分類佔比表可展開明細（第二編輯入口）*/
+  .sum-table tr.cat-row.expandable { cursor:pointer; }
+  .sum-table tr.cat-row.expandable td:first-child::before { content:'▸ '; color:var(--muted); font-size:11px; }
+  .sum-table tr.cat-row.expanded td:first-child::before { content:'▾ '; }
+  td.sum-cat-drill { padding:4px 4px 8px !important; }
+  /* 需求3：inline 就地編輯表單（分析面板明細 / 總結卡明細共用）*/
+  .inline-edit { display:flex; flex-direction:column; gap:7px; width:100%; }
+  .inline-edit .ie-row { display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
+  .inline-edit input, .inline-edit select { padding:7px 9px; font-size:13px; background:var(--panel); color:var(--text);
+    border:1px solid var(--line); border-radius:8px; font-family:inherit; }
+  .inline-edit .ie-amt { width:110px; }
+  .inline-edit .ie-item { flex:1; min-width:130px; }
+  .inline-edit .ie-cat, .inline-edit .ie-acct { flex:1; min-width:110px; }
+  .inline-edit .ie-btns { display:flex; gap:7px; margin-left:auto; }
 
   /* 列印 / 存 PDF：僅在「總結卡開啟時列印」生效——靠 body.sum-printing（beforeprint 時才加），
      避免一般 Ctrl+P 在未開總結卡時誤印空白卡。只輸出總結卡本體，控制列(.sum-noprint)與未勾區塊不入鏡，深色轉白底黑字 */
@@ -331,6 +360,14 @@
       -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
     body.sum-printing #summary-modal h2, body.sum-printing #summary-modal h3,
     body.sum-printing .sum-title, body.sum-printing .sum-stat .v, body.sum-printing .sum-table td { color:#000 !important; }
+    /* 需求1（列印也紅）：支出金額用紅色印出，特異度須壓過上方強制黑字 */
+    body.sum-printing .sum-stat .v.sum-neg,
+    body.sum-printing .sum-table td.sum-neg,
+    body.sum-printing .sum-item .si-amt.sum-neg,
+    body.sum-printing .sum-neg { color:var(--red) !important; }
+    /* 需求2/3（列印隔離）：未勾明細列與 inline 編輯表單不入鏡 */
+    body.sum-printing .sum-item.hidden-item { display:none !important; }
+    body.sum-printing .inline-edit { display:none !important; }
     body.sum-printing .sum-noprint { display:none !important; }
     body.sum-printing .sum-stat { background:#f6f6f6 !important; border-color:#ccc !important; }
     /* 低對比補強：含表格內帶行內 var(--muted) 的 .sub（需 !important 壓過行內樣式）、空狀態、箭頭 */
@@ -1295,7 +1332,7 @@ function computeTripSummary() {
   const cats = chartRows('cat');
   const catTotal = cats.reduce((s, r) => s + r.value, 0);
   const catRows = cats.map(r => ({
-    label: r.label, value: r.value, pct: catTotal > 0 ? r.value / catTotal * 100 : 0
+    key: r.key, label: r.label, value: r.value, pct: catTotal > 0 ? r.value / catTotal * 100 : 0
   }));
   // 支付方式 / 帳戶結餘
   const accts = data.accounts.map(a => {
@@ -1357,9 +1394,9 @@ function toggleExcluded(mode, key) {
 }
 
 // 旅程總結：使用者自選顯示哪些區塊（獨立 key、不進 data/匯出，與 jp_chart_excluded 同模式）
-const SUMMARY_SECTIONS = ['core', 'cat', 'pay', 'split'];
+const SUMMARY_SECTIONS = ['core', 'cat', 'pay', 'split', 'items'];
 function getSummarySections() {
-  const out = { core: true, cat: true, pay: true, split: true }; // 預設全開
+  const out = { core: true, cat: true, pay: true, split: true, items: false }; // 明細預設收起（可能很長）
   try {
     const s = JSON.parse(localStorage.getItem('jp_summary_sections') || '{}') || {};
     for (const k of SUMMARY_SECTIONS) if (typeof s[k] === 'boolean') out[k] = s[k];
@@ -1372,6 +1409,99 @@ function toggleSummarySection(k) {
   s[k] = !s[k];
   try { localStorage.setItem('jp_summary_sections', JSON.stringify(s)); } catch (e) {}
   renderSummary();
+}
+
+// 需求2：消費明細逐筆顯示狀態（存「被隱藏的 txn id」，預設空＝全顯示；容忍過期 id）
+function getSummaryHiddenItems() {
+  try { const a = JSON.parse(localStorage.getItem('jp_summary_hidden_items') || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+function toggleSummaryHiddenItem(id) {
+  const a = getSummaryHiddenItems();
+  const i = a.indexOf(id);
+  if (i >= 0) a.splice(i, 1); else a.push(id);
+  try { localStorage.setItem('jp_summary_hidden_items', JSON.stringify(a)); } catch (e) {}
+  renderSummary();
+}
+
+/* ===================== 需求3：inline 就地編輯單筆消費 =====================
+   分析面板鑽取明細 / 總結卡消費明細 / 總結卡分類展開明細 三處共用。
+   ctx: 'drill'（分析面板）| 'summary'（總結卡）→ 決定儲存/取消後重繪哪個視圖。*/
+let _inlineEditId = null;        // 目前正在編輯的 txn id（同時僅一筆）
+let _summaryExpandedCat = null;  // 總結卡分類佔比表目前展開的大類 key
+let _drillCtx = null;            // 分析面板目前鑽取的 {mode, key}
+function rerenderInline(ctx) {
+  if (ctx === 'drill') { if (_drillCtx) renderDrilldown(_drillCtx.mode, _drillCtx.key); else renderAnalysisPanel(); }
+  else { renderSummary(); }
+}
+function catOptionsHTML(selected) {
+  const keys = Object.keys(data.categories || {});
+  const opts = keys.slice();
+  if (selected && !keys.includes(selected)) opts.unshift(selected); // 歷史值不在清單→補回保住
+  let html = opts.map(c => `<option${c === selected ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('');
+  html += `<option value=""${selected ? '' : ' selected'}>（不分類）</option>`;
+  return html;
+}
+function acctOptionsHTML(selected) {
+  return data.accounts.map(a =>
+    `<option value="${escapeHtml(a.id)}"${a.id === selected ? ' selected' : ''}>${escapeHtml(a.name)}（${escapeHtml(a.currency)}）</option>`).join('');
+}
+// 就地編輯表單（欄位 id 固定；t.id / ctx 皆內部值，無使用者引號注入風險）
+function inlineEditFormHTML(t, ctx) {
+  return `<div class="inline-edit">` +
+    `<div class="ie-row">` +
+      `<input class="ie-amt" id="ie-amt" type="number" min="1" step="1" inputmode="numeric" value="${escapeHtml(t.amount)}" aria-label="金額">` +
+      `<input class="ie-item" id="ie-item" type="text" value="${escapeHtml(t.item || '')}" placeholder="品名" aria-label="品名">` +
+    `</div>` +
+    `<div class="ie-row">` +
+      `<select class="ie-cat" id="ie-cat" aria-label="分類">${catOptionsHTML(t.cat || '')}</select>` +
+      `<select class="ie-acct" id="ie-acct" aria-label="帳戶">${acctOptionsHTML(t.account)}</select>` +
+      `<div class="ie-btns">` +
+        `<button class="btn btn-sm btn-primary" onclick="saveInlineEdit('${t.id}','${ctx}')">儲存</button>` +
+        `<button class="btn btn-sm" onclick="cancelInlineEdit('${ctx}')">取消</button>` +
+      `</div>` +
+    `</div>` +
+  `</div>`;
+}
+function startInlineEdit(id, ctx) { _inlineEditId = id; rerenderInline(ctx); }
+function cancelInlineEdit(ctx) { _inlineEditId = null; rerenderInline(ctx); }
+function saveInlineEdit(id, ctx) {
+  const t = data.txns.find(x => x.id === id);
+  if (!t) { toast('找不到這筆記錄'); _inlineEditId = null; rerenderInline(ctx); return; }
+  const amount = Number(document.getElementById('ie-amt').value);
+  if (!amount || amount <= 0) { toast('請輸入大於 0 的金額'); return; }
+  const account = document.getElementById('ie-acct').value;
+  if (!account || !acctById(account)) { toast('請選擇支付帳戶'); return; }
+  const item = document.getElementById('ie-item').value.trim();
+  if (!item) { toast('請輸入消費品項/名稱'); return; }
+  const cat = document.getElementById('ie-cat').value;
+  Object.assign(t, { amount, account, item, cat }); // 只覆蓋 4 欄，保留 date/note/subcat/id/type
+  _inlineEditId = null;
+  save();
+  renderChart();          // 同步更新內嵌卡片圓餅
+  rerenderInline(ctx);
+  toast('已更新 ✅');
+}
+function toggleSummaryCatExpand(catKey) {
+  _summaryExpandedCat = (_summaryExpandedCat === catKey) ? null : catKey;
+  _inlineEditId = null;   // 切換分類時關閉進行中的編輯
+  renderSummary();
+}
+// 總結卡單筆明細列（withCheck=true 顯示「是否入鏡」勾選框；共用於消費明細區塊與分類展開）
+function sumItemHTML(t, withCheck, ctx) {
+  if (t.id === _inlineEditId) return `<div class="sum-item">${inlineEditFormHTML(t, ctx)}</div>`;
+  const a = acctById(t.account); const cur = a ? a.currency : 'JPY';
+  const hidden = withCheck && getSummaryHiddenItems().indexOf(t.id) >= 0;
+  const catTxt = [t.cat, t.subcat].filter(Boolean).join(' › ');
+  const chk = withCheck
+    ? `<input type="checkbox" class="si-chk sum-noprint" ${hidden ? '' : 'checked'} onchange="toggleSummaryHiddenItem('${t.id}')" aria-label="是否顯示於截圖/列印">`
+    : '';
+  return `<div class="sum-item${hidden ? ' hidden-item' : ''}">` + chk +
+    `<div class="si-main"><div class="si-name">${escapeHtml(t.item || '（未命名）')}</div>` +
+    `<div class="si-meta"><span>${fullDate(t.date)}</span>` +
+    (catTxt ? `<span>${escapeHtml(catTxt)}</span>` : '') +
+    `<span>${a ? escapeHtml(a.name) : '?'}</span></div></div>` +
+    `<div class="si-amt sum-neg">${fmt(t.amount, cur)}</div>` +
+    `<button class="si-edit sum-noprint" onclick="startInlineEdit('${t.id}','${ctx}')" aria-label="修改這筆">✏️</button></div>`;
 }
 
 /* ===================== 格式化 ===================== */
@@ -1680,7 +1810,7 @@ function renderSummary() {
     `<span class="chk-dot" style="background:${sec[k] ? 'var(--green)' : 'var(--line)'}"></span>${label}</label>`;
   html += `<div class="chk-list sum-noprint">` +
     chip('core', '核心摘要') + chip('cat', '分類佔比') + chip('pay', '支付/結餘') +
-    (hasMembers ? chip('split', '分攤結算') : '') + `</div>`;
+    (hasMembers ? chip('split', '分攤結算') : '') + chip('items', '消費明細') + `</div>`;
   html += `<div class="sum-hint sum-noprint">勾選要顯示的區塊；列印或截圖只會呈現勾選的內容。</div>`;
 
   // 邊界：完全沒有消費記錄
@@ -1693,9 +1823,9 @@ function renderSummary() {
   // 區塊 A：核心摘要
   if (sec.core) {
     html += `<div class="modal-section"><h3>核心摘要</h3><div class="sum-stats">` +
-      `<div class="sum-stat wide"><div class="k">總花費${hideRate() ? '' : '（台幣換算）'}</div><div class="v">${fmt(s.totals.totalTWD, 'TWD')}</div>` +
+      `<div class="sum-stat wide"><div class="k">總花費${hideRate() ? '' : '（台幣換算）'}</div><div class="v sum-neg">${fmt(s.totals.totalTWD, 'TWD')}</div>` +
       (hideRate() ? '' : `<div class="sub">日幣 ${fmt(s.totals.jpy, 'JPY')}（≒NT$${Math.round(toTWD(s.totals.jpy, 'JPY')).toLocaleString('en-US')}）　＋　台幣 ${fmt(s.totals.twd, 'TWD')}</div>`) + `</div>` +
-      `<div class="sum-stat"><div class="k">每日平均</div><div class="v">${fmt(s.avgTWD, 'TWD')}</div><div class="sub">${s.days} 天</div></div>` +
+      `<div class="sum-stat"><div class="k">每日平均</div><div class="v sum-neg">${fmt(s.avgTWD, 'TWD')}</div><div class="sub">${s.days} 天</div></div>` +
       `<div class="sum-stat"><div class="k">消費筆數</div><div class="v">${s.count}</div><div class="sub">筆</div></div>` +
       `</div></div>`;
   }
@@ -1704,10 +1834,17 @@ function renderSummary() {
   if (sec.cat) {
     let rows = '';
     for (const r of s.catRows) {
-      rows += `<tr><td>${escapeHtml(r.label)}<div class="sum-bar" style="width:${Math.max(3, Math.round(r.pct))}%"></div></td>` +
-        `<td class="num">${fmt(r.value, 'TWD')}</td><td class="num">${r.pct.toFixed(1)}%</td></tr>`;
+      const isExp = _summaryExpandedCat === r.key;
+      rows += `<tr class="cat-row expandable${isExp ? ' expanded' : ''}" data-catkey="${escapeHtml(r.key)}">` +
+        `<td>${escapeHtml(r.label)}<div class="sum-bar" style="width:${Math.max(3, Math.round(r.pct))}%"></div></td>` +
+        `<td class="num sum-neg">${fmt(r.value, 'TWD')}</td><td class="num">${r.pct.toFixed(1)}%</td></tr>`;
+      if (isExp) {
+        const list = txnsForKey('cat', r.key).slice().sort((a, b) => a.date < b.date ? 1 : (a.date > b.date ? -1 : 0));
+        const items = list.length ? list.map(t => sumItemHTML(t, false, 'summary')).join('') : '<div class="split-empty">此分類沒有明細。</div>';
+        rows += `<tr class="cat-drill-row sum-noprint"><td class="sum-cat-drill" colspan="3"><div class="sum-items">${items}</div></td></tr>`;
+      }
     }
-    html += `<div class="modal-section"><h3>分類佔比</h3>` +
+    html += `<div class="modal-section"><h3>分類佔比<span class="sum-hint sum-noprint" style="display:inline;margin-left:6px">（點分類可展開明細修改）</span></h3>` +
       (s.catRows.length ? `<table class="sum-table"><thead><tr><th>類別</th><th class="num">金額(台幣)</th><th class="num">佔比</th></tr></thead><tbody>${rows}</tbody></table>`
                         : `<div class="split-empty">沒有可分類的消費。</div>`) + `</div>`;
   }
@@ -1720,7 +1857,7 @@ function renderSummary() {
       const twdSub = a.currency === 'TWD' ? '' :
         `<div class="sub" style="font-size:11px;color:var(--muted)">≒NT$${Math.round(a.spentTWD).toLocaleString('en-US')}</div>`;
       rows += `<tr><td>${escapeHtml(a.name)}</td>` +
-        `<td class="num">${fmt(a.spent, a.currency)}${twdSub}</td>` +
+        `<td class="num sum-neg">${fmt(a.spent, a.currency)}${twdSub}</td>` +
         `<td class="num">${a.isCredit ? '（信用卡）' : fmt(a.balance, a.currency)}</td></tr>`;
     }
     html += `<div class="modal-section"><h3>支付方式 / 帳戶結餘</h3>` +
@@ -1741,6 +1878,16 @@ function renderSummary() {
     }
     if (s.settle.skipped > 0) body += `<div class="settle-note">另有 ${s.settle.skipped} 筆待檢查的分帳未列入結算。</div>`;
     html += `<div class="modal-section"><h3>分攤結算（${cur === 'JPY' ? '日幣' : '台幣'}）</h3>${body}</div>`;
+  }
+
+  // 區塊 E：消費明細（逐筆可勾選是否入鏡 + 可 inline 編輯）
+  if (sec.items) {
+    const exp = data.txns.filter(t => t.type === 'expense')
+      .slice().sort((a, b) => a.date < b.date ? 1 : (a.date > b.date ? -1 : 0));
+    const body = exp.length
+      ? `<div class="sum-items">${exp.map(t => sumItemHTML(t, true, 'summary')).join('')}</div>`
+      : `<div class="split-empty">還沒有消費記錄。</div>`;
+    html += `<div class="modal-section"><h3>消費明細<span class="sum-hint sum-noprint" style="display:inline;margin-left:6px">（取消勾選的不入鏡；點 ✏️ 可修改）</span></h3>${body}</div>`;
   }
 
   // 頁尾（可列印；標示出處與產生時間）
@@ -1765,6 +1912,7 @@ function drillLabel(mode, key) {
   return key;
 }
 function drillRowHTML(t) {
+  if (t.id === _inlineEditId) return `<div class="txn" style="display:block">${inlineEditFormHTML(t, 'drill')}</div>`;
   const a = acctById(t.account); const cur = a ? a.currency : 'JPY';
   const catTxt = [t.cat, t.subcat].filter(Boolean).join(' › ');
   return `<div class="txn"><div class="mid">` +
@@ -1774,9 +1922,11 @@ function drillRowHTML(t) {
     `<span class="chip" style="background:${escapeHtml(a ? a.color : '#888')}">${a ? escapeHtml(a.name) : '?'}</span>` +
     (t.note ? `<span>· ${escapeHtml(t.note)}</span>` : '') + `</div></div>` +
     `<div class="amt"><div class="v exp">−${fmt(t.amount, cur).replace('-', '')}</div>` +
-    `<div class="twd conv">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div></div></div>`;
+    `<div class="twd conv">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div></div>` +
+    `<button class="si-edit" style="align-self:center;margin-left:8px" onclick="startInlineEdit('${t.id}','drill')" aria-label="修改這筆">✏️</button></div>`;
 }
 function renderDrilldown(mode, key) {
+  _drillCtx = { mode, key };
   const body = document.getElementById('analysis-body');
   if (!body) return;
   const list = txnsForKey(mode, key).slice().sort((a, b) => a.date < b.date ? 1 : (a.date > b.date ? -1 : 0));
@@ -2558,6 +2708,11 @@ document.getElementById('analysis-modal').addEventListener('change', onChartChec
 document.getElementById('analysis-modal').addEventListener('click', e => {
   const el = e.target.closest && e.target.closest('[data-drill]');
   if (el) renderDrilldown(chartMode, decodeURIComponent(el.dataset.drill));
+});
+/* 旅程總結：點分類佔比列 → 展開/收合該類明細（可 inline 編輯）；用 data-catkey 避開分類名引號 */
+document.getElementById('summary-modal').addEventListener('click', e => {
+  const row = e.target.closest && e.target.closest('tr.cat-row[data-catkey]');
+  if (row) toggleSummaryCatExpand(row.dataset.catkey);
 });
 /* 單筆點內容區（.mid）展開看全文；選取模式＝點列切換選取；自訂排序模式停用展開避免和拖曳搶手勢 */
 document.getElementById('txn-list').addEventListener('click', e => {
