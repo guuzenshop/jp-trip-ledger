@@ -395,6 +395,14 @@
     body.sum-printing .inline-edit { display:none !important; }
     body.sum-printing .sum-noprint { display:none !important; }
     body.sum-printing .sum-stat { background:#f6f6f6 !important; border-color:#ccc !important; }
+    /* 分類佔比／支付方式 展開明細列（.sum-item）：螢幕為深色卡片，列印須轉白底深字，
+       否則深底 var(--panel2) 被 print-color-adjust 強制印出＋品名繼承黑字＝黑底黑字看不清 */
+    body.sum-printing .sum-item { background:#fff !important; border-color:#ccc !important; }
+    body.sum-printing .sum-item .si-name { color:#000 !important; }
+    body.sum-printing .sum-item .si-meta,
+    body.sum-printing .sum-item .si-meta span { color:#444 !important; }
+    /* 拆分徽章：深紫底改淺紫底深紫字，列印可讀（金額紅色由上方 sum-neg 規則保留）*/
+    body.sum-printing .split-badge { background:#ede9fe !important; color:#5b21b6 !important; }
     /* 低對比補強：含表格內帶行內 var(--muted) 的 .sub（需 !important 壓過行內樣式）、空狀態、箭頭 */
     body.sum-printing .sum-stat .k, body.sum-printing .sum-stat .sub,
     body.sum-printing .sum-table th, body.sum-printing .sum-table .sub,
