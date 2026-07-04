@@ -317,6 +317,9 @@
   .sum-title span { display:block; font-size:13px; font-weight:500; color:var(--muted); margin-top:3px; }
   .sum-chk { } /* 沿用 .chk / .chk.off / .chk-dot 既有勾選樣式 */
   .sum-hint { font-size:12px; color:var(--muted); margin:2px 0 12px; }
+  .sum-expand-all { float:right; margin-top:-2px; font-size:11px; padding:3px 10px; border-radius:999px;
+    border:1px solid var(--line); background:var(--panel2); color:var(--muted); cursor:pointer; font-family:inherit; font-weight:600; }
+  .sum-expand-all:hover { background:#2c313d; color:var(--text); }
   .sum-stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:4px 0 2px; }
   .sum-stat { background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
   .sum-stat.wide { grid-column:1 / -1; }
@@ -1522,8 +1525,8 @@ function toggleSummaryHiddenItem(id) {
    分析面板鑽取明細 / 總結卡消費明細 / 總結卡分類展開明細 三處共用。
    ctx: 'drill'（分析面板）| 'summary'（總結卡）→ 決定儲存/取消後重繪哪個視圖。*/
 let _inlineEditId = null;        // 目前正在編輯的 txn id（同時僅一筆）
-let _summaryExpandedCat = null;  // 總結卡分類佔比表目前展開的大類 key
-let _summaryExpandedPay = null;  // 總結卡支付方式表目前展開的帳戶 id
+const _summaryExpandedCats = new Set();  // 總結卡分類佔比表目前展開的大類 key（多選，支援一鍵全展開）
+const _summaryExpandedPays = new Set();  // 總結卡支付方式表目前展開的帳戶 id（多選，支援一鍵全展開）
 let _drillCtx = null;            // 分析面板目前鑽取的 {mode, key}
 let drillSort = 'date_desc';     // 鑽取明細排序（頁面存活期間沿用；✏️ 編輯重繪不重置）
 function rerenderInline(ctx) {
@@ -1579,13 +1582,32 @@ function saveInlineEdit(id, ctx) {
   toast('已更新 ✅');
 }
 function toggleSummaryCatExpand(catKey) {
-  _summaryExpandedCat = (_summaryExpandedCat === catKey) ? null : catKey;
+  if (_summaryExpandedCats.has(catKey)) _summaryExpandedCats.delete(catKey);
+  else _summaryExpandedCats.add(catKey);
   _inlineEditId = null;   // 切換分類時關閉進行中的編輯
   renderSummary();
 }
 function toggleSummaryPayExpand(payKey) {
-  _summaryExpandedPay = (_summaryExpandedPay === payKey) ? null : payKey;
+  if (_summaryExpandedPays.has(payKey)) _summaryExpandedPays.delete(payKey);
+  else _summaryExpandedPays.add(payKey);
   _inlineEditId = null;   // 切換帳戶時關閉進行中的編輯
+  renderSummary();
+}
+// 一鍵全展開/全收合（智慧 toggle）：已全展開→清空收合，否則塞入該區塊全部 key
+function toggleAllSummaryCat() {
+  const keys = computeTripSummary().catRows.map(r => r.key);
+  const allExp = keys.length > 0 && keys.every(k => _summaryExpandedCats.has(k));
+  _summaryExpandedCats.clear();
+  if (!allExp) keys.forEach(k => _summaryExpandedCats.add(k));
+  _inlineEditId = null;
+  renderSummary();
+}
+function toggleAllSummaryPay() {
+  const ids = computeTripSummary().accts.map(a => a.id);
+  const allExp = ids.length > 0 && ids.every(id => _summaryExpandedPays.has(id));
+  _summaryExpandedPays.clear();
+  if (!allExp) ids.forEach(id => _summaryExpandedPays.add(id));
+  _inlineEditId = null;
   renderSummary();
 }
 // 總結卡單筆明細列（withCheck=true 顯示「是否入鏡」勾選框；共用於消費明細區塊與分類展開）
@@ -1937,7 +1959,7 @@ function renderSummary() {
   if (sec.cat) {
     let rows = '';
     for (const r of s.catRows) {
-      const isExp = _summaryExpandedCat === r.key;
+      const isExp = _summaryExpandedCats.has(r.key);
       rows += `<tr class="cat-row expandable${isExp ? ' expanded' : ''}" data-catkey="${escapeHtml(r.key)}">` +
         `<td>${escapeHtml(r.label)}<div class="sum-bar" style="width:${Math.max(3, Math.round(r.pct))}%"></div></td>` +
         `<td class="num sum-neg">${fmt(r.value, 'TWD')}</td><td class="num">${r.pct.toFixed(1)}%</td></tr>`;
@@ -1948,7 +1970,9 @@ function renderSummary() {
         rows += `<tr class="cat-drill-row"><td class="sum-cat-drill" colspan="3"><div class="sum-items">${items}</div></td></tr>`;
       }
     }
-    html += `<div class="modal-section"><h3>分類佔比<span class="sum-hint sum-noprint" style="display:inline;margin-left:6px">（點分類可展開明細；展開的明細會印入 PDF，可逐筆勾選 / 修改）</span></h3>` +
+    const catAllExp = s.catRows.length > 0 && s.catRows.every(r => _summaryExpandedCats.has(r.key));
+    const catExpandBtn = s.catRows.length ? `<button class="sum-expand-all sum-noprint" onclick="toggleAllSummaryCat()">${catAllExp ? '收合全部 ▴' : '展開全部 ▾'}</button>` : '';
+    html += `<div class="modal-section"><h3>分類佔比${catExpandBtn}<span class="sum-hint sum-noprint" style="display:inline;margin-left:6px">（點分類可展開明細；展開的明細會印入 PDF，可逐筆勾選 / 修改）</span></h3>` +
       (s.catRows.length ? `<table class="sum-table"><thead><tr><th>類別</th><th class="num">金額(台幣)</th><th class="num">佔比</th></tr></thead><tbody>${rows}</tbody></table>`
                         : `<div class="split-empty">沒有可分類的消費。</div>`) + `</div>`;
   }
@@ -1960,7 +1984,7 @@ function renderSummary() {
       // 台幣帳戶不顯示冗餘的「≒NT$」換算（與原幣相同）
       const twdSub = a.currency === 'TWD' ? '' :
         `<div class="sub" style="font-size:11px;color:var(--muted)">≒NT$${Math.round(a.spentTWD).toLocaleString('en-US')}</div>`;
-      const isExp = _summaryExpandedPay === a.id;
+      const isExp = _summaryExpandedPays.has(a.id);
       rows += `<tr class="pay-row expandable${isExp ? ' expanded' : ''}" data-paykey="${escapeHtml(a.id)}">` +
         `<td>${escapeHtml(a.name)}</td>` +
         `<td class="num sum-neg">${fmt(a.spent, a.currency)}${twdSub}</td>` +
@@ -1971,7 +1995,9 @@ function renderSummary() {
         rows += `<tr class="cat-drill-row"><td class="sum-cat-drill" colspan="3"><div class="sum-items">${items}</div></td></tr>`;
       }
     }
-    html += `<div class="modal-section"><h3>支付方式 / 帳戶結餘<span class="sum-hint sum-noprint" style="display:inline;margin-left:6px">（點帳戶可展開明細；展開的明細會印入 PDF，可逐筆勾選 / 修改）</span></h3>` +
+    const payAllExp = s.accts.length > 0 && s.accts.every(a => _summaryExpandedPays.has(a.id));
+    const payExpandBtn = s.accts.length ? `<button class="sum-expand-all sum-noprint" onclick="toggleAllSummaryPay()">${payAllExp ? '收合全部 ▴' : '展開全部 ▾'}</button>` : '';
+    html += `<div class="modal-section"><h3>支付方式 / 帳戶結餘${payExpandBtn}<span class="sum-hint sum-noprint" style="display:inline;margin-left:6px">（點帳戶可展開明細；展開的明細會印入 PDF，可逐筆勾選 / 修改）</span></h3>` +
       `<table class="sum-table"><thead><tr><th>帳戶</th><th class="num">本次花費</th><th class="num">結餘</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
