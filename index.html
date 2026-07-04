@@ -156,6 +156,15 @@
   .badge.exp { background:#3a2224; color:#fca5a5; } .badge.top { background:#1e2e44; color:#93c5fd; }
   .cat-badge { font-size:10px; padding:1px 7px; border-radius:6px; background:var(--panel2); color:var(--muted); }
   .empty { text-align:center; color:var(--muted); padding:30px; font-size:14px; }
+  /* 拆分組（複合交易）：組容器 / 組頭 / 角標 */
+  .split-badge { font-size:10px; padding:1px 6px; border-radius:6px; background:#2b2440; color:#c4b5fd; font-weight:600; flex-shrink:0; }
+  .gid-group { border-left:3px solid #a78bfa; border-radius:8px; padding:2px 0 2px 8px; display:flex; flex-direction:column; gap:8px; }
+  .gid-head { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); padding:2px 4px 0; flex-wrap:wrap; }
+  .gid-head .g-sum { font-weight:700; color:var(--text); }
+  .gid-head .gid-del { margin-left:auto; }
+  .split-row { display:grid; grid-template-columns:.9fr .9fr 1.4fr .9fr auto; gap:6px; align-items:center; margin-bottom:7px; }
+  .split-row input, .split-row select { padding:8px 9px; font-size:13.5px; }
+  .split-row.bad input, .split-row.bad select { border-color:var(--red); }
 
   /* Modal */
   .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none;
@@ -409,6 +418,8 @@
   @media (max-width:560px) {
     .multi-row { grid-template-columns:1fr 1fr; gap:5px; padding:9px 9px 9px; border:1px solid var(--line); border-radius:10px; margin-bottom:10px; position:relative; }
     .multi-row .multi-del { position:absolute; top:6px; right:6px; width:28px; height:28px; }
+    .split-row { grid-template-columns:1fr 1fr; gap:5px; padding:9px 9px 9px; border:1px solid var(--line); border-radius:10px; margin-bottom:10px; position:relative; }
+    .split-row .multi-del { position:absolute; top:6px; right:6px; width:28px; height:28px; }
   }
 
   /* 選取模式（多選批量編輯）*/
@@ -517,6 +528,18 @@
         <div class="field full expense-only">
           <label>消費品項 / 名稱</label>
           <input type="text" id="f-item" placeholder="例：南海電鐵 關西機場→難波" />
+        </div>
+
+        <!-- 🧾 拆分（複合交易：一筆刷卡拆多個分類品項） -->
+        <div class="field full expense-only" id="split-toggle-field">
+          <label class="fee-toggle"><input type="checkbox" id="f-split-on" onchange="onSplitToggle()"> 🧾 拆分（一筆刷卡拆成多個分類品項）</label>
+        </div>
+        <div class="field full" id="split-rows-field" style="display:none">
+          <div id="split-rows"></div>
+          <div class="form-actions" style="margin-top:6px">
+            <button type="button" class="btn btn-sm" onclick="addSplitRow()">＋ 加一項</button>
+            <span class="hint" id="split-sum-line" style="flex:1;align-self:center;text-align:right"></span>
+          </div>
         </div>
 
         <!-- 儲值 -->
@@ -1158,6 +1181,8 @@ let selectMode = false;            // 選取（多選批量編輯）模式
 let selectedIds = new Set();       // 已選取的 txn id
 let entryMode = 'single';          // 'single' | 'multi'（新增表單模式）
 let multiRows = [];                // 多列輸入暫存
+let splitRows = [];                // 🧾 拆分列輸入暫存（cat/subcat/item/amount）
+let _gidCountCache = null;         // gidCounts 渲染週期快取（save 時失效）
 let _batchModalApply = null;       // 批量 modal 套用 callback
 
 function load() {
@@ -1185,9 +1210,17 @@ function load() {
   }
 }
 function save() {
+  _gidCountCache = null;           // 資料變更 → 拆分組計數快取失效
   try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
   catch (e) { toast('儲存失敗，可能空間不足：' + e.message); }
 }
+// 單一 gid 的全帳本筆數（lazy 快取；角標判定用）
+function gidCountOf(gid) {
+  if (!_gidCountCache) _gidCountCache = gidCounts(data.txns);
+  return _gidCountCache[gid] || 0;
+}
+// 這筆是否屬於有效拆分組（全帳本 ≥2 筆才算，殘組自動退化）
+function isGrouped(t) { return t.type === 'expense' && validGid(t.gid) && gidCountOf(t.gid) >= 2; }
 
 /* ===================== 計算 ===================== */
 function acctById(id) { return data.accounts.find(a => a.id === id); }
@@ -1279,6 +1312,56 @@ function parseMultiRowEntries(rows, accountIds) {
   });
   return { valid, errors, emptyCount };
 }
+
+/* ===================== 拆分組（複合交易）純函式（?test=1 自測；不依賴 DOM）===================== */
+// gid（拆分組欄位）格式驗證：expense 限定、格式同 id；匯入時非法值剝除
+function validGid(g) { return typeof g === 'string' && /^[a-z0-9]{1,32}$/i.test(g); }
+// 全帳本 gid → expense 筆數（角標與聚攏的退化判定：筆數 <2 視同無組，資料不動、顯示自動退化）
+function gidCounts(txns) {
+  const m = {};
+  for (const t of (txns || [])) {
+    if (t.type === 'expense' && validGid(t.gid)) m[t.gid] = (m[t.gid] || 0) + 1;
+  }
+  return m;
+}
+// 清單聚攏：同 gid ≥2 筆（以傳入清單為域＝同日內）集中到組首位置，組員依原相對順序；
+// 回渲染序列 [{kind:'txn',t} | {kind:'group',gid,txns:[]}]；純函式不改動輸入
+function clusterByGid(list) {
+  const cnt = {};
+  for (const t of (list || [])) if (t.type === 'expense' && validGid(t.gid)) cnt[t.gid] = (cnt[t.gid] || 0) + 1;
+  const seq = []; const groupAt = {};
+  for (const t of (list || [])) {
+    const g = (t.type === 'expense' && validGid(t.gid) && cnt[t.gid] >= 2) ? t.gid : null;
+    if (!g) { seq.push({ kind: 'txn', t }); continue; }
+    if (groupAt[g]) { groupAt[g].txns.push(t); continue; }
+    const node = { kind: 'group', gid: g, txns: [t] };
+    groupAt[g] = node; seq.push(node);
+  }
+  return seq;
+}
+// 拆分列解析：rows=[{cat,subcat,item,amount}]（date/account/note 由表單共用，不在列上）；
+// 空白列略過；回 {valid,errors,emptyCount}（驗證規則對齊 parseMultiRowEntries）
+function parseSplitFormRows(rows) {
+  const valid = [], errors = [];
+  let emptyCount = 0;
+  (rows || []).forEach((row, i) => {
+    const item = (row.item || '').trim();
+    const amtRaw = row.amount;
+    const amount = Number(amtRaw);
+    const hasAmount = amtRaw !== '' && amtRaw != null && Number.isFinite(amount);
+    if (item === '' && !hasAmount) { emptyCount++; return; }
+    if (!item) { errors.push({ i, msg: '缺品項' }); return; }
+    if (!Number.isFinite(amount) || amount <= 0) { errors.push({ i, msg: '金額需大於 0' }); return; }
+    valid.push({ cat: row.cat || '', subcat: (row.subcat || '').trim(), item, amount });
+  });
+  return { valid, errors, emptyCount };
+}
+// 編輯整筆替換時保留拆分組欄位（submitForm 編輯分支重組新物件會丟欄位）；改成 topup 則不帶
+function preserveGid(oldTxn, newTxn) {
+  if (oldTxn && validGid(oldTxn.gid) && newTxn.type === 'expense') newTxn.gid = oldTxn.gid;
+  return newTxn;
+}
+
 // ?test=1 自測（手續費/對調/換算/多列）
 function runBatchFeeSelfTest() {
   let pass = 0, fail = 0; const fails = [];
@@ -1505,6 +1588,7 @@ function sumItemHTML(t, withCheck, ctx) {
   return `<div class="sum-item${hidden ? ' hidden-item' : ''}">` + chk +
     `<div class="si-main"><div class="si-name">${escapeHtml(t.item || '（未命名）')}</div>` +
     `<div class="si-meta"><span>${fullDate(t.date)}</span>` +
+    (isGrouped(t) ? '<span class="split-badge" title="拆分組其中一筆">🧾</span>' : '') +
     (catTxt ? `<span>${escapeHtml(catTxt)}</span>` : '') +
     `<span>${a ? escapeHtml(a.name) : '?'}</span></div></div>` +
     `<div class="si-amt sum-neg">${fmt(t.amount, cur)}</div>` +
@@ -1925,6 +2009,7 @@ function drillRowHTML(t) {
   return `<div class="txn"><div class="mid">` +
     `<div class="desc" style="white-space:normal">${escapeHtml(t.item || '（未命名）')}</div>` +
     `<div class="meta"><span class="cat-badge">${fullDate(t.date)}</span>` +
+    (isGrouped(t) ? '<span class="split-badge" title="拆分組其中一筆">🧾</span>' : '') +
     (catTxt ? `<span class="cat-badge">${escapeHtml(catTxt)}</span>` : '') +
     `<span class="chip" style="background:${escapeHtml(a ? a.color : '#888')}">${a ? escapeHtml(a.name) : '?'}</span>` +
     (t.note ? `<span>· ${escapeHtml(t.note)}</span>` : '') + `</div></div>` +
@@ -2019,6 +2104,7 @@ function txnInnerHTML(t, showDate) {
         <div class="desc" title="${escapeHtml(t.item || '（未命名）')}">${escapeHtml(t.item || '（未命名）')}</div>
         <div class="meta">
           ${dateTag}
+          ${isGrouped(t) ? '<span class="split-badge" title="拆分組其中一筆">🧾</span>' : ''}
           ${catTxt ? `<span class="cat-badge">${escapeHtml(catTxt)}</span>` : ''}
           <span class="chip" style="background:${escapeHtml(a ? a.color : '#888')}">${a ? escapeHtml(a.name) : '?'}</span>
           ${t.note ? '<span class="note-mark">📝</span><span class="note-text">· ' + escapeHtml(t.note) + '</span>' : ''}
@@ -2208,11 +2294,51 @@ function renderTxns() {
     group.innerHTML = `<div class="day-head"><span>${fullDate(date)}</span><span>當日消費 <span class="sum">NT$${Math.round(daySumTWD).toLocaleString('en-US')}</span></span></div>`;
     const list = document.createElement('div');
     list.className = 'txn-list';
-    for (const t of items) list.appendChild(makeTxnDiv(t, false));
+    // 🧾 同日同拆分組聚攏（組首位置、組員保原相對順序）；金額/自訂排序平鋪視圖不聚攏（角標識別）
+    for (const node of clusterByGid(items)) {
+      if (node.kind === 'group') list.appendChild(makeGidGroupDiv(node));
+      else list.appendChild(makeTxnDiv(node.t, false));
+    }
     group.appendChild(list);
     host.appendChild(group);
   }
   window._flashId = null;
+}
+
+// 🧾 拆分組容器（日期分組視圖）：組頭「同筆刷卡 · 合計 · 整組刪除」＋組員列（沿用單筆互動）
+function makeGidGroupDiv(node) {
+  const wrap = document.createElement('div');
+  wrap.className = 'gid-group';
+  let sumTWD = 0; const curSums = {}; const acctSet = new Set();
+  for (const t of node.txns) {
+    const a = acctById(t.account);
+    const cur = a ? a.currency : 'JPY';
+    curSums[cur] = (curSums[cur] || 0) + (Number(t.amount) || 0);
+    if (a) sumTWD += toTWD(Number(t.amount) || 0, a.currency);
+    acctSet.add(t.account);
+  }
+  const oneAcct = acctSet.size === 1 ? acctById(node.txns[0].account) : null;
+  const curKeys = Object.keys(curSums);
+  // 全組同幣別 → 原幣合計；被編輯打破（混幣別）→ 退回台幣合計
+  const sumTxt = curKeys.length === 1 ? fmt(curSums[curKeys[0]], curKeys[0]) : 'NT$' + Math.round(sumTWD).toLocaleString('en-US');
+  const head = document.createElement('div');
+  head.className = 'gid-head';
+  head.innerHTML = `<span class="split-badge">🧾 同筆刷卡</span>` +
+    (oneAcct ? `<span class="chip" style="background:${escapeHtml(oneAcct.color)}">${escapeHtml(oneAcct.name)}</span>` : '') +
+    `<span class="g-sum">合計 ${sumTxt}</span><span>（${node.txns.length} 筆）</span>` +
+    (selectMode ? '' : `<button class="btn btn-sm btn-icon btn-danger gid-del" title="刪除整組拆分" aria-label="刪除整組拆分" onclick="delGroup('${escapeHtml(node.gid)}')">🗑️</button>`);
+  wrap.appendChild(head);
+  for (const t of node.txns) wrap.appendChild(makeTxnDiv(t, false));
+  return wrap;
+}
+// 🧾 整組刪除（單一 confirm）
+function delGroup(gid) {
+  const n = data.txns.filter(t => t.type === 'expense' && t.gid === gid).length;
+  if (!n) return;
+  if (!confirm(`確定刪除整組拆分（共 ${n} 筆）？`)) return;
+  data.txns = data.txns.filter(t => !(t.type === 'expense' && t.gid === gid));
+  if (editingId && !data.txns.some(t => t.id === editingId)) cancelEdit();
+  save(); render();
 }
 
 /* ===================== 下拉 / 分類 ===================== */
@@ -2252,6 +2378,7 @@ function onTypeChange() {
   updatePreview();
   const feeOn = document.getElementById('f-fee-on');
   if (feeOn && feeOn.checked) refreshFeeSelects(); // 切換型態時更新手續費預設扣款帳戶
+  applySplitVisibility();          // 🧾 拆分欄位顯示與 type/編輯狀態同步（須在 expense-only 顯示重設之後）
 }
 function onTopupAcctChange() { toamtTouched = false; updateToAmtField(); updatePreview(); }
 function updateToAmtField() {
@@ -2266,6 +2393,7 @@ function updatePreview() {
   const amt = Number(document.getElementById('f-amount').value) || 0;
   const prev = document.getElementById('amt-preview');
   if (type === 'expense') {
+    if (isSplitOn()) updateSplitSum();   // 🧾 換帳戶時同步拆分合計的幣別顯示
     const a = acctById(document.getElementById('f-account').value);
     if (!a || !amt) { prev.textContent = ''; return; }
     prev.textContent = a.currency === 'TWD'
@@ -2290,8 +2418,10 @@ function submitForm(event) {
   if (event) event.preventDefault();
   const type = getType();
   const date = document.getElementById('f-date').value || today();
-  const amount = Number(document.getElementById('f-amount').value);
   const note = document.getElementById('f-note').value.trim();
+  // 🧾 拆分模式（僅新增；編輯時開關已隱藏）：多列各自驗證，總額=Σ列，不吃 f-amount
+  if (type === 'expense' && !editingId && isSplitOn()) return submitSplitForm(date, note);
+  const amount = Number(document.getElementById('f-amount').value);
   if (!amount || amount <= 0) { toast('請輸入大於 0 的金額'); return false; }
 
   let txn;
@@ -2318,6 +2448,7 @@ function submitForm(event) {
 
   if (editingId) {
     const idx = data.txns.findIndex(t => t.id === editingId);
+    preserveGid(data.txns[idx], txn);   // 拆分組員編輯後保留組關聯（整筆替換會丟欄位）
     txn.id = editingId; data.txns[idx] = txn;
     window._flashId = editingId;
     cancelEdit();
@@ -2358,10 +2489,12 @@ function resetFormKeepDate() {
   toamtTouched = false;
   document.getElementById('amt-preview').textContent = '';
   resetFeeBlock();
-  if (getType() === 'expense') document.getElementById('f-item').focus();
+  applySplitVisibility();          // 🧾 取消編輯回到新增 → 拆分開關恢復可見（依目前勾選狀態顯示）
+  if (getType() === 'expense' && !isSplitOn()) document.getElementById('f-item').focus();
 }
 
 function fillForm(t) {
+  resetSplitBlock();               // 編輯/複製都以單筆表單呈現 → 先關拆分（複製拆分筆＝複製為一般單筆）
   document.querySelector(`input[name="ttype"][value="${t.type}"]`).checked = true;
   onTypeChange();
   document.getElementById('f-date').value = t.date;
@@ -2634,11 +2767,14 @@ function sanitizeImport(d) {
     let id = /^[a-z0-9]+$/i.test(t.id || '') ? t.id : genId();
     while (seen.has(id)) id = genId(); // 去重：撞號重發直到唯一，避免拖曳/編輯誤指
     seen.add(id);
-    return { ...t, id,
+    const out = { ...t, id,
       type: (t.type === 'expense' || t.type === 'topup') ? t.type : 'expense',
       amount: Number(t.amount) || 0,
       toAmount: t.toAmount != null ? (Number(t.toAmount) || 0) : t.toAmount,
       date: /^\d{4}-\d{2}-\d{2}$/.test(t.date || '') ? t.date : today() };
+    // gid（拆分組）：expense 限定＋格式白名單，非法/竄改值剝除（縱深防禦）
+    if (!(out.type === 'expense' && validGid(t.gid))) delete out.gid;
+    return out;
   });
   if (!Array.isArray(d.members)) d.members = [];
   if (!Array.isArray(d.splits)) d.splits = [];
@@ -2688,14 +2824,14 @@ function restoreAutobak() {
   toast('已還原上次自動備份 ✅');
 }
 function exportCSV() {
-  const rows = [['日期', '類型', '大項', '小項', '品項/說明', '從帳戶', '到帳戶', '金額', '幣別', '台幣換算', '備註']];
+  const rows = [['日期', '類型', '大項', '小項', '品項/說明', '從帳戶', '到帳戶', '金額', '幣別', '台幣換算', '備註', '拆分組']];
   for (const t of data.txns) {
     if (t.type === 'expense') {
       const a = acctById(t.account);
-      rows.push([t.date, '消費', t.cat || '', t.subcat || '', t.item || '', a ? a.name : '', '', t.amount, a ? a.currency : '', Math.round(toTWD(t.amount, a ? a.currency : 'JPY')), t.note || '']);
+      rows.push([t.date, '消費', t.cat || '', t.subcat || '', t.item || '', a ? a.name : '', '', t.amount, a ? a.currency : '', Math.round(toTWD(t.amount, a ? a.currency : 'JPY')), t.note || '', validGid(t.gid) ? t.gid : '']);
     } else {
       const from = acctById(t.from), to = acctById(t.to);
-      rows.push([t.date, '儲值', '', '', (from ? from.name : '') + '→' + (to ? to.name : ''), from ? from.name : '', to ? to.name : '', t.amount, from ? from.currency : '', '', t.note || '']);
+      rows.push([t.date, '儲值', '', '', (from ? from.name : '') + '→' + (to ? to.name : ''), from ? from.name : '', to ? to.name : '', t.amount, from ? from.currency : '', '', t.note || '', '']);
     }
   }
   // CSV 公式注入防護：以 = + - @ 開頭的儲存格前綴單引號，避免 Excel/Sheets 當公式執行
@@ -3242,6 +3378,116 @@ function updateFeePreview() {
     : `≒ NT$${Math.round(toTWD(amt, 'JPY')).toLocaleString('en-US')}`;
 }
 
+/* ===================== 🧾 拆分輸入（複合交易 UI）===================== */
+function isSplitOn() { const el = document.getElementById('f-split-on'); return !!(el && el.checked); }
+function emptySplitRow() {
+  return { cat: Object.keys(data.categories)[0] || '', subcat: '', item: '', amount: '' };
+}
+function onSplitToggle() {
+  if (isSplitOn() && splitRows.length === 0) splitRows = [emptySplitRow(), emptySplitRow()];
+  applySplitVisibility();
+  if (isSplitOn()) { renderSplitRows(); updateSplitSum(); }
+}
+// 拆分顯示狀態統一管理：開啟時隱藏單筆專屬欄位（分類/小項/品項/金額）；開關本身編輯模式不顯示
+function applySplitVisibility() {
+  const isExp = getType() === 'expense';
+  const on = isSplitOn() && isExp && !editingId;
+  const tf = document.getElementById('split-toggle-field');
+  if (tf) tf.style.display = (isExp && !editingId) ? '' : 'none';
+  const rowsField = document.getElementById('split-rows-field');
+  if (rowsField) rowsField.style.display = on ? '' : 'none';
+  if (!isExp) return;                // topup：expense-only 欄位已由 onTypeChange 隱藏，不再干預
+  ['f-cat', 'f-subcat', 'f-item'].forEach(id => {
+    const el = document.getElementById(id); if (!el) return;
+    const f = el.closest('.field'); if (f) f.style.display = on ? 'none' : '';
+  });
+  const amtEl = document.getElementById('f-amount');
+  const amtF = amtEl ? amtEl.closest('.field') : null;
+  if (amtF) amtF.style.display = on ? 'none' : '';
+}
+function resetSplitBlock() {
+  const on = document.getElementById('f-split-on'); if (on) on.checked = false;
+  applySplitVisibility();
+}
+function addSplitRow() { splitRows.push(emptySplitRow()); renderSplitRows(); updateSplitSum(); }
+function removeSplitRow(i) {
+  splitRows.splice(i, 1);
+  if (splitRows.length === 0) splitRows.push(emptySplitRow());
+  renderSplitRows(); updateSplitSum();
+}
+function onSplitInput(i, field, val) {
+  if (splitRows[i]) splitRows[i][field] = val;
+  if (field === 'amount') updateSplitSum();
+}
+function onSplitCat(i, val) {
+  if (splitRows[i]) splitRows[i].cat = val;
+  const dl = document.getElementById('ssub-' + i);
+  if (dl) dl.innerHTML = (data.categories[val] || []).map(s => `<option value="${escapeHtml(s)}">`).join('');
+}
+function updateSplitSum() {
+  const line = document.getElementById('split-sum-line'); if (!line) return;
+  let sum = 0, n = 0;
+  for (const r of splitRows) { const a = Number(r.amount); if (Number.isFinite(a) && a > 0) { sum += a; n++; } }
+  const acct = acctById(document.getElementById('f-account').value);
+  line.textContent = n ? `合計 ${fmt(sum, acct ? acct.currency : 'JPY')}（${n} 項）` : '';
+}
+function renderSplitRows() {
+  const host = document.getElementById('split-rows');
+  if (!host) return;
+  const catOpts = c => Object.keys(data.categories).map(k => `<option ${k === c ? 'selected' : ''}>${escapeHtml(k)}</option>`).join('') + `<option value="" ${c === '' ? 'selected' : ''}>（不分類）</option>`;
+  host.innerHTML = splitRows.map((r, i) => {
+    const subs = (data.categories[r.cat] || []).map(s => `<option value="${escapeHtml(s)}">`).join('');
+    return `<div class="split-row" data-i="${i}">` +
+      `<select onchange="onSplitCat(${i},this.value)" aria-label="大項">${catOpts(r.cat)}</select>` +
+      `<input type="text" value="${escapeHtml(r.subcat)}" list="ssub-${i}" placeholder="小項" oninput="onSplitInput(${i},'subcat',this.value)" aria-label="小項"><datalist id="ssub-${i}">${subs}</datalist>` +
+      `<input type="text" value="${escapeHtml(r.item)}" placeholder="品項/名稱" oninput="onSplitInput(${i},'item',this.value)" aria-label="品項">` +
+      `<input type="number" inputmode="decimal" step="any" value="${escapeHtml(r.amount)}" placeholder="金額" oninput="onSplitInput(${i},'amount',this.value)" aria-label="金額">` +
+      `<button type="button" class="btn btn-sm btn-danger multi-del" onclick="removeSplitRow(${i})" aria-label="移除這項">✕</button>` +
+    `</div>`;
+  }).join('');
+}
+// 🧾 拆分送出（僅新增）：多列共用 date/account/note、各列自組 expense txn；≥2 列共用 gid、1 列退化為一般單筆
+function submitSplitForm(date, note) {
+  const account = document.getElementById('f-account').value;
+  if (!account || !acctById(account)) { toast('請選擇支付帳戶'); return false; }
+  const res = parseSplitFormRows(splitRows);
+  document.querySelectorAll('#split-rows .split-row').forEach(el => el.classList.remove('bad'));
+  if (res.errors.length) {
+    res.errors.forEach(e => { const el = document.querySelector(`#split-rows .split-row[data-i="${e.i}"]`); if (el) el.classList.add('bad'); });
+    const first = res.errors[0];
+    toast(`第 ${first.i + 1} 項：${first.msg}${res.errors.length > 1 ? `（共 ${res.errors.length} 項待修正）` : ''}`);
+    return false;
+  }
+  if (!res.valid.length) { toast('拆分至少要填一項（品項＋金額）'); return false; }
+  const gid = res.valid.length >= 2 ? genId() : null;
+  let lastId = null;
+  for (const r of res.valid) {
+    const t = { type: 'expense', date, account, cat: r.cat, subcat: r.subcat, item: r.item, amount: r.amount, note };
+    if (gid) t.gid = gid;
+    t.id = genId(); data.txns.push(t); lastId = t.id;
+  }
+  window._flashId = lastId;
+  // 手續費（沿用單筆邏輯；獨立筆、不入組）
+  const feeOnEl = document.getElementById('f-fee-on');
+  const feeAmt = Number(document.getElementById('f-fee-amount').value);
+  let feeMsg = '';
+  if (feeOnEl && feeOnEl.checked && Number.isFinite(feeAmt) && feeAmt > 0) {
+    const feeAcct = document.getElementById('f-fee-account').value;
+    if (feeAcct && acctById(feeAcct)) {
+      ensureFeeCategory();
+      const fee = buildFeeTxn({ date, account: feeAcct, type: document.getElementById('f-fee-type').value, amount: feeAmt, baseLabel: '拆分×' + res.valid.length });
+      fee.id = genId(); data.txns.push(fee);
+      feeMsg = '（含手續費）';
+    } else feeMsg = '（手續費未選扣款帳戶，略過）';
+  }
+  toast(gid ? `已新增拆分 ${res.valid.length} 筆${feeMsg} ✅` : `已新增 ✅${feeMsg}`);
+  save(); render();
+  splitRows = [emptySplitRow(), emptySplitRow()];
+  renderSplitRows(); updateSplitSum();
+  resetFormKeepDate();
+  return false;
+}
+
 /* ===================== 新增表單模式（單筆 / 多列）===================== */
 function forceSingleEntryMode() {
   entryMode = 'single';
@@ -3550,16 +3796,77 @@ function runDrillSortSelfTest() {
   ok(sortDrillCore([], 'date_desc').length === 0, '空輸入→空陣列');
   return { pass, fail, fails };
 }
-/* ?test=1：核心自測硬 gate（分帳 23 案 + 手續費/批量/多列 案 + 支付分組案 + 鑽取排序案）*/
+// ?test=1 自測（🧾 拆分組/複合交易 純函式）
+function runGidGroupSelfTest() {
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (c, n) => { if (c) pass++; else { fail++; fails.push(n); } };
+
+  // validGid：格式白名單
+  ok(validGid('abc123') && validGid('K9') === true, 'validGid 合法值');
+  ok(!validGid('') && !validGid(null) && !validGid(123) && !validGid({}) , 'validGid 非字串/空值拒絕');
+  ok(!validGid('a'.repeat(33)) && validGid('a'.repeat(32)), 'validGid 長度上限 32');
+  ok(!validGid('a b') && !validGid('a"b') && !validGid('a<b>'), 'validGid 引號/空白/角括號拒絕');
+
+  // gidCounts：expense 限定、topup 不計、無 gid 不計
+  const T = (id, gid, type, date) => ({ id, type: type || 'expense', date: date || '2026-07-04', account: 'card', amount: 100, gid });
+  const cnt = gidCounts([T('a', 'g1'), T('b', 'g1'), T('c', 'g2'), T('d', 'g1', 'topup'), T('e')]);
+  ok(cnt.g1 === 2 && cnt.g2 === 1 && Object.keys(cnt).length === 2, 'gidCounts：expense 限定計數（topup/無 gid 不計）');
+  ok(Object.keys(gidCounts([])).length === 0 && Object.keys(gidCounts(null)).length === 0, 'gidCounts：空/null 輸入');
+
+  // clusterByGid：聚攏保序、組首位置、<2 退化、不改輸入
+  const list = [T('a'), T('b', 'g1'), T('c'), T('d', 'g1'), T('e', 'g2'), T('f', 'g1')];
+  const seq = clusterByGid(list);
+  ok(seq.length === 4, 'clusterByGid：4 節點（單a + 組g1 + 單c + 單e[g2退化]）');
+  ok(seq[0].kind === 'txn' && seq[0].t.id === 'a', 'clusterByGid：組外筆保位');
+  ok(seq[1].kind === 'group' && seq[1].gid === 'g1' && seq[1].txns.map(t => t.id).join(',') === 'b,d,f', 'clusterByGid：組佔組首位置、組員保原相對順序');
+  ok(seq[2].kind === 'txn' && seq[2].t.id === 'c', 'clusterByGid：組員後移不影響其他筆順序');
+  ok(seq[3].kind === 'txn' && seq[3].t.id === 'e', 'clusterByGid：單殘 gid（<2 筆）退化為一般筆');
+  ok(list.map(t => t.id).join(',') === 'a,b,c,d,e,f', 'clusterByGid：純函式不改動輸入');
+  ok(clusterByGid([]).length === 0, 'clusterByGid：空輸入');
+
+  // parseSplitFormRows：驗證規則
+  const pr = parseSplitFormRows([
+    { cat: '飲食', subcat: '', item: '拉麵', amount: '300' },
+    { cat: '交通', subcat: '計程車', item: 'taxi', amount: '200' },
+    { cat: '', subcat: '', item: '', amount: '' },
+    { cat: '飲食', subcat: '', item: '', amount: '50' },
+    { cat: '飲食', subcat: '', item: '咖啡', amount: '0' }
+  ]);
+  ok(pr.valid.length === 2 && pr.valid[0].amount === 300 && pr.valid[1].cat === '交通', 'parseSplitFormRows：有效列解析');
+  ok(pr.emptyCount === 1, 'parseSplitFormRows：空白列略過');
+  ok(pr.errors.length === 2 && pr.errors[0].msg === '缺品項' && pr.errors[1].msg === '金額需大於 0', 'parseSplitFormRows：缺品項/金額≤0 擋下');
+
+  // preserveGid：編輯整筆替換保留 gid；改 topup 不帶
+  const kept = preserveGid({ gid: 'g9' }, { type: 'expense' });
+  ok(kept.gid === 'g9', 'preserveGid：expense 編輯保留 gid');
+  ok(!('gid' in preserveGid({ gid: 'g9' }, { type: 'topup' })), 'preserveGid：改 topup 不保留');
+  ok(!('gid' in preserveGid({}, { type: 'expense' })), 'preserveGid：原筆無 gid 不添加');
+  ok(!('gid' in preserveGid({ gid: '<bad>' }, { type: 'expense' })), 'preserveGid：非法 gid 不傳播');
+
+  // sanitizeImport：gid 白名單（合法保留、非法剝除、topup 剝除）— sanitizeImport 為純函式可直測
+  const sd = sanitizeImport({ ledgerName: 't', rate: 5, accounts: [{ id: 'card', currency: 'JPY' }], txns: [
+    { id: 'a1', type: 'expense', amount: 100, date: '2026-07-04', gid: 'g1' },
+    { id: 'a2', type: 'expense', amount: 100, date: '2026-07-04', gid: { evil: 1 } },
+    { id: 'a3', type: 'topup', amount: 100, date: '2026-07-04', gid: 'g1' },
+    { id: 'a4', type: 'expense', amount: 100, date: '2026-07-04', gid: 'x"onclick=' }
+  ] });
+  ok(sd.txns[0].gid === 'g1', 'sanitizeImport：合法 gid 保留');
+  ok(!('gid' in sd.txns[1]) && !('gid' in sd.txns[3]), 'sanitizeImport：物件/注入字串 gid 剝除');
+  ok(!('gid' in sd.txns[2]), 'sanitizeImport：topup 的 gid 剝除');
+
+  return { pass, fail, fails };
+}
+/* ?test=1：核心自測硬 gate（分帳 23 案 + 手續費/批量/多列 案 + 支付分組案 + 鑽取排序案 + 拆分組案）*/
 try {
   if (location.search.indexOf('test=1') >= 0) {
     const tr = runSplitSelfTest();
     const tr2 = runBatchFeeSelfTest();
     const tr3 = runDrillGroupSelfTest();
     const tr4 = runDrillSortSelfTest();
-    const fail = tr.fail + tr2.fail + tr3.fail + tr4.fail;
-    const fails = tr.fails.concat(tr2.fails, tr3.fails, tr4.fails);
-    const pass = tr.pass + tr2.pass + tr3.pass + tr4.pass;
+    const tr5 = runGidGroupSelfTest();
+    const fail = tr.fail + tr2.fail + tr3.fail + tr4.fail + tr5.fail;
+    const fails = tr.fails.concat(tr2.fails, tr3.fails, tr4.fails, tr5.fails);
+    const pass = tr.pass + tr2.pass + tr3.pass + tr4.pass + tr5.pass;
     if (fail > 0) { console.error('自測 FAIL', fails); toast('⚠️ 自測失敗：\n' + fails.join('\n')); }
     else { console.log('自測 PASS ' + pass + ' / FAIL 0'); toast('✅ 自測全數通過（' + pass + ' 案）'); }
   }
