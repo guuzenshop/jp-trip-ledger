@@ -161,7 +161,8 @@
   .gid-group { border-left:3px solid #a78bfa; border-radius:8px; padding:2px 0 2px 8px; display:flex; flex-direction:column; gap:8px; }
   .gid-head { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); padding:2px 4px 0; flex-wrap:wrap; }
   .gid-head .g-sum { font-weight:700; color:var(--text); }
-  .gid-head .gid-del { margin-left:auto; }
+  .gid-head .gid-edit { margin-left:auto; }
+  .gid-head .gid-del { margin-left:0; }
   .split-row { display:grid; grid-template-columns:.9fr .9fr 1.4fr .9fr auto; gap:6px; align-items:center; margin-bottom:7px; }
   .split-row input, .split-row select { padding:8px 9px; font-size:13.5px; }
   .split-row.bad input, .split-row.bad select { border-color:var(--red); }
@@ -600,7 +601,7 @@
 
       <div class="form-actions">
         <button type="submit" class="btn btn-primary" id="f-submit">新增</button>
-        <button type="button" class="btn btn-ghost" id="f-cancel" style="display:none" onclick="cancelEdit()">取消編輯</button>
+        <button type="button" class="btn btn-ghost" id="f-cancel" style="display:none" onclick="cancelForm()">取消編輯</button>
       </div>
     </form>
 
@@ -1190,7 +1191,9 @@ let selectMode = false;            // 選取（多選批量編輯）模式
 let selectedIds = new Set();       // 已選取的 txn id
 let entryMode = 'single';          // 'single' | 'multi'（新增表單模式）
 let multiRows = [];                // 多列輸入暫存
-let splitRows = [];                // 🧾 拆分列輸入暫存（cat/subcat/item/amount）
+let splitRows = [];                // 🧾 拆分列輸入暫存（cat/subcat/item/amount；可帶 id＝對應既有筆）
+let editingGid = null;             // 🧾 整組編輯／事後拆分模式的 gid（null＝非群組編輯；② 事後拆分為現鑄新 gid）
+let groupEditIds = [];             // 進入群組編輯時載入的既有筆 id（reconcile 用來判定「被移除的列」）
 let _gidCountCache = null;         // gidCounts 渲染週期快取（save 時失效）
 let _batchModalApply = null;       // 批量 modal 套用 callback
 
@@ -1361,7 +1364,7 @@ function parseSplitFormRows(rows) {
     if (item === '' && !hasAmount) { emptyCount++; return; }
     if (!item) { errors.push({ i, msg: '缺品項' }); return; }
     if (!Number.isFinite(amount) || amount <= 0) { errors.push({ i, msg: '金額需大於 0' }); return; }
-    valid.push({ cat: row.cat || '', subcat: (row.subcat || '').trim(), item, amount });
+    valid.push({ id: row.id, cat: row.cat || '', subcat: (row.subcat || '').trim(), item, amount });
   });
   return { valid, errors, emptyCount };
 }
@@ -1369,6 +1372,43 @@ function parseSplitFormRows(rows) {
 function preserveGid(oldTxn, newTxn) {
   if (oldTxn && validGid(oldTxn.gid) && newTxn.type === 'expense') newTxn.gid = oldTxn.gid;
   return newTxn;
+}
+// 整組編輯／事後拆分重存（純函式，可離線單測）：
+//   txns=目前全清單；gid=本組 gid（② 事後拆分為現鑄新 gid）；originalIds=進場載入的既有筆 id；
+//   shared={date,account,note} 整組共用；validRows=[{id?,cat,subcat,item,amount}]（id＝對應既有筆，無 id＝新列）
+//   規則：≥2 有效列才掛 gid（1 列退化為一般單筆，鏡射新增拆分）；
+//   既有列就地覆蓋（保留 id）、無 id 列新建、載入時在組內但這次沒保留的既有筆刪除；組外筆完全不動。
+function reconcileGroupRows(txns, gid, originalIds, shared, validRows) {
+  const rows = validRows || [];
+  const finalGid = rows.length >= 2 ? gid : null;
+  const origSet = new Set(originalIds || []);
+  const byId = {};
+  for (const r of rows) if (r.id && origSet.has(r.id)) byId[r.id] = r;   // 只把「載入集合內」的 id 當既有列
+  const keptIds = new Set(Object.keys(byId));
+  const out = [];
+  let lastId = null;
+  for (const t of (txns || [])) {
+    if (origSet.has(t.id) && !keptIds.has(t.id)) continue;               // 被移除的列 → 刪除
+    if (keptIds.has(t.id)) {
+      const r = byId[t.id];
+      const nt = { ...t, type: 'expense', date: shared.date, account: shared.account,
+        cat: r.cat || '', subcat: (r.subcat || '').trim(), item: (r.item || '').trim(),
+        amount: Number(r.amount) || 0, note: shared.note };
+      if (finalGid) nt.gid = finalGid; else delete nt.gid;
+      out.push(nt); lastId = nt.id;
+    } else {
+      out.push(t);                                                       // 組外筆不動
+    }
+  }
+  for (const r of rows) {                                                // 無 id（或 id 不在載入集合）→ 新列
+    if (r.id && origSet.has(r.id)) continue;
+    const nt = { type: 'expense', date: shared.date, account: shared.account,
+      cat: r.cat || '', subcat: (r.subcat || '').trim(), item: (r.item || '').trim(),
+      amount: Number(r.amount) || 0, note: shared.note, id: genId() };
+    if (finalGid) nt.gid = finalGid;
+    out.push(nt); lastId = nt.id;
+  }
+  return { txns: out, lastId };
 }
 
 // ?test=1 自測（手續費/對調/換算/多列）
@@ -2160,7 +2200,7 @@ function txnInnerHTML(t, showDate) {
         <div class="v exp">−${fmt(t.amount, cur).replace('-', '')}</div>
         <div class="twd conv">≒ NT$${Math.round(toTWD(t.amount, cur)).toLocaleString('en-US')}</div>
       </div>
-      ${opsHTML(t.id)}`;
+      ${opsHTML(t)}`;
   }
   const from = acctById(t.from), to = acctById(t.to);
   const fc = from ? from.currency : 'JPY', tc = to ? to.currency : 'JPY';
@@ -2174,7 +2214,7 @@ function txnInnerHTML(t, showDate) {
         <div class="v top">${fmt(t.amount, fc)}${fc !== tc ? ' → ' + fmt(toAmt, tc) : ''}</div>
         <div class="twd">不計入消費</div>
       </div>
-      ${opsHTML(t.id)}`;
+      ${opsHTML(t)}`;
 }
 function makeTxnDiv(t, showDate, withHandle) {
   const div = document.createElement('div');
@@ -2196,12 +2236,16 @@ function makeTxnDiv(t, showDate, withHandle) {
   return div;
 }
 
-// 單筆操作：桌機三顆並排；手機收合成「⋯」，點開選 複製/編輯/刪除
-function opsHTML(id) {
+// 單筆操作：桌機並排；手機收合成「⋯」，點開選 複製/(拆分)/編輯/刪除
+// 「🧾 拆分這筆」只對「未成組的一般 expense（排除手續費筆）」出現＝事後把單筆升級成拆分組
+function opsHTML(t) {
+  const id = t.id;
+  const canSplit = t.type === 'expense' && !isGrouped(t) && t.cat !== FEE_CAT;
   return '<div class="ops">' +
     '<button class="btn btn-sm btn-icon ops-toggle" title="操作" aria-label="更多操作" onclick="toggleOps(event,this)">⋯</button>' +
     '<div class="ops-menu">' +
     `<button class="btn btn-sm btn-icon" title="複製這筆" aria-label="複製" onclick="duplicate('${id}')">📋<span class="ops-label">複製</span></button>` +
+    (canSplit ? `<button class="btn btn-sm btn-icon" title="拆分這筆（升級成拆分組）" aria-label="拆分這筆" onclick="startSplitExisting('${id}')">🧾<span class="ops-label">拆分</span></button>` : '') +
     `<button class="btn btn-sm btn-icon" title="編輯這筆" aria-label="編輯" onclick="startEdit('${id}')">✏️<span class="ops-label">編輯</span></button>` +
     `<button class="btn btn-sm btn-icon btn-danger" title="刪除這筆" aria-label="刪除" onclick="del('${id}')">🗑️<span class="ops-label">刪除</span></button>` +
     '</div></div>';
@@ -2372,7 +2416,9 @@ function makeGidGroupDiv(node) {
   head.innerHTML = `<span class="split-badge">🧾 同筆刷卡</span>` +
     (oneAcct ? `<span class="chip" style="background:${escapeHtml(oneAcct.color)}">${escapeHtml(oneAcct.name)}</span>` : '') +
     `<span class="g-sum">合計 ${sumTxt}</span><span>（${node.txns.length} 筆）</span>` +
-    (selectMode ? '' : `<button class="btn btn-sm btn-icon btn-danger gid-del" title="刪除整組拆分" aria-label="刪除整組拆分" onclick="delGroup('${escapeHtml(node.gid)}')">🗑️</button>`);
+    (selectMode ? '' :
+      `<button class="btn btn-sm btn-icon gid-edit" title="編輯整組拆分" aria-label="編輯整組拆分" onclick="openGroupEdit('${escapeHtml(node.gid)}')">✏️</button>` +
+      `<button class="btn btn-sm btn-icon btn-danger gid-del" title="刪除整組拆分" aria-label="刪除整組拆分" onclick="delGroup('${escapeHtml(node.gid)}')">🗑️</button>`);
   wrap.appendChild(head);
   for (const t of node.txns) wrap.appendChild(makeTxnDiv(t, false));
   return wrap;
@@ -2416,6 +2462,7 @@ function updateSubcatList() {
 /* ===================== 表單 ===================== */
 function getType() { return document.querySelector('input[name="ttype"]:checked').value; }
 function onTypeChange() {
+  if (editingGid && getType() !== 'expense') cancelGroupEdit();   // 群組編輯僅限 expense；切 topup 先退出再續跑
   const type = getType();
   document.querySelectorAll('.expense-only').forEach(e => e.style.display = type === 'expense' ? '' : 'none');
   document.querySelectorAll('.topup-only').forEach(e => e.style.display = type === 'topup' ? '' : 'none');
@@ -2465,6 +2512,7 @@ function submitForm(event) {
   const type = getType();
   const date = document.getElementById('f-date').value || today();
   const note = document.getElementById('f-note').value.trim();
+  if (editingGid) return submitGroupEdit(date, note);   // 🧾 整組編輯／事後拆分重存（優先於一般分支）
   // 🧾 拆分模式（僅新增；編輯時開關已隱藏）：多列各自驗證，總額=Σ列，不吃 f-amount
   if (type === 'expense' && !editingId && isSplitOn()) return submitSplitForm(date, note);
   const amount = Number(document.getElementById('f-amount').value);
@@ -2564,6 +2612,7 @@ function fillForm(t) {
 function startEdit(id) {
   const t = data.txns.find(x => x.id === id);
   if (!t) return;
+  if (editingGid) cancelGroupEdit();   // 互斥：離開群組編輯再進單筆編輯
   forceSingleEntryMode();      // 編輯僅限單筆模式
   editingId = id;
   expandForm();
@@ -2576,6 +2625,7 @@ function startEdit(id) {
 function duplicate(id) {
   const t = data.txns.find(x => x.id === id);
   if (!t) return;
+  if (editingGid) cancelGroupEdit();   // 互斥：離開群組編輯再複製
   forceSingleEntryMode();
   editingId = null;            // 視為「新增」，不覆蓋原本那筆
   expandForm();
@@ -3441,9 +3491,11 @@ function onSplitToggle() {
 // 拆分顯示狀態統一管理：開啟時隱藏單筆專屬欄位（分類/小項/品項/金額）；開關本身編輯模式不顯示
 function applySplitVisibility() {
   const isExp = getType() === 'expense';
-  const on = isSplitOn() && isExp && !editingId;
+  // 群組編輯（editingGid）強制顯示拆分列；單筆編輯（editingId）不顯示拆分
+  const on = (isSplitOn() || !!editingGid) && isExp && !editingId;
   const tf = document.getElementById('split-toggle-field');
-  if (tf) tf.style.display = (isExp && !editingId) ? '' : 'none';
+  // 群組編輯中隱藏拆分開關（不可中途取消拆分）
+  if (tf) tf.style.display = (isExp && !editingId && !editingGid) ? '' : 'none';
   const rowsField = document.getElementById('split-rows-field');
   if (rowsField) rowsField.style.display = on ? '' : 'none';
   if (!isExp) return;                // topup：expense-only 欄位已由 onTypeChange 隱藏，不再干預
@@ -3538,6 +3590,90 @@ function submitSplitForm(date, note) {
   return false;
 }
 
+/* ===================== 🧾 整組編輯 / 事後拆分 ===================== */
+// 共用：把表單切到「群組編輯」呈現（拆分列顯示、開關/手續費隱藏、標題/鈕）。呼叫前 state（editingGid/groupEditIds/splitRows/欄位）已設好。
+function enterGroupEditUI(title) {
+  closeAllOps();
+  forceSingleEntryMode();
+  const rExp = document.querySelector('input[name="ttype"][value="expense"]'); if (rExp) rExp.checked = true;
+  const on = document.getElementById('f-split-on'); if (on) on.checked = true;   // 保持 isSplitOn()==true
+  onTypeChange();                 // 套 expense 顯示 + applySplitVisibility（editingGid 已設→顯示拆分列、藏開關）
+  expandForm();
+  showFeeBlock(false);            // 手續費獨立不入組
+  document.getElementById('form-mode-title').textContent = title;
+  document.getElementById('f-submit').textContent = '儲存';
+  document.getElementById('f-cancel').style.display = '';
+  renderSplitRows(); updateSplitSum();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+// ① 組頭 ✏️：載入整組全部兄弟筆
+function openGroupEdit(gid) {
+  if (editingId) cancelEdit();
+  const members = data.txns.filter(t => t.type === 'expense' && t.gid === gid);
+  if (!members.length) { toast('找不到這個拆分組'); return; }
+  editingGid = gid;
+  groupEditIds = members.map(t => t.id);
+  splitRows = members.map(t => ({ id: t.id, cat: t.cat || '', subcat: t.subcat || '', item: t.item || '', amount: t.amount }));
+  const first = members[0];
+  document.getElementById('f-date').value = first.date || today();
+  document.getElementById('f-account').value = first.account;
+  document.getElementById('f-note').value = first.note || '';
+  enterGroupEditUI('編輯拆分組（整組共用日期／帳戶／備註）');
+}
+// ② 單筆 ⋯「拆分這筆」：把單筆升級成拆分組（原筆＝第一列、帶原 id；≥2 列才成組）
+function startSplitExisting(id) {
+  if (editingId) cancelEdit();
+  const t = data.txns.find(x => x.id === id);
+  if (!t || t.type !== 'expense') { toast('只有消費筆可以拆分'); return; }
+  editingGid = genId();           // 現鑄新 gid（存檔且 ≥2 列時才落到 txn）
+  groupEditIds = [t.id];
+  splitRows = [
+    { id: t.id, cat: t.cat || '', subcat: t.subcat || '', item: t.item || '', amount: t.amount },
+    emptySplitRow()
+  ];
+  document.getElementById('f-date').value = t.date || today();
+  document.getElementById('f-account').value = t.account;
+  document.getElementById('f-note').value = t.note || '';
+  enterGroupEditUI('拆分這筆（原筆＝第一項，補其他項；整組共用日期／帳戶／備註）');
+}
+// 群組編輯重存：驗證 → reconcile → 寫回
+function submitGroupEdit(date, note) {
+  const account = document.getElementById('f-account').value;
+  if (!account || !acctById(account)) { toast('請選擇支付帳戶'); return false; }
+  const res = parseSplitFormRows(splitRows);
+  document.querySelectorAll('#split-rows .split-row').forEach(el => el.classList.remove('bad'));
+  if (res.errors.length) {
+    res.errors.forEach(e => { const el = document.querySelector(`#split-rows .split-row[data-i="${e.i}"]`); if (el) el.classList.add('bad'); });
+    const first = res.errors[0];
+    toast(`第 ${first.i + 1} 項：${first.msg}${res.errors.length > 1 ? `（共 ${res.errors.length} 項待修正）` : ''}`);
+    return false;
+  }
+  if (!res.valid.length) { toast('整組至少要保留一項（要刪整組請用組頭 🗑️）'); return false; }
+  const r = reconcileGroupRows(data.txns, editingGid, groupEditIds, { date, account, note }, res.valid);
+  data.txns = r.txns;
+  window._flashId = r.lastId;
+  const n = res.valid.length;
+  save(); render();
+  cancelGroupEdit();
+  toast(n >= 2 ? `已更新拆分組（${n} 筆）✅` : '已更新 ✅');
+  return false;
+}
+// 取消群組編輯 → 回一般新增
+function cancelGroupEdit() {
+  editingGid = null;
+  groupEditIds = [];
+  splitRows = [emptySplitRow(), emptySplitRow()];
+  const on = document.getElementById('f-split-on'); if (on) on.checked = false;
+  document.getElementById('form-mode-title').textContent = '新增記錄';
+  document.getElementById('f-submit').textContent = '新增';
+  document.getElementById('f-cancel').style.display = 'none';
+  showFeeBlock(true);
+  resetFormKeepDate();            // 清欄位 + applySplitVisibility（此時 editingGid 已 null → 開關恢復、拆分列收起）
+  renderSplitRows(); updateSplitSum();
+}
+// 取消鈕統一分派（單筆編輯 / 群組編輯）
+function cancelForm() { if (editingGid) cancelGroupEdit(); else cancelEdit(); }
+
 /* ===================== 新增表單模式（單筆 / 多列）===================== */
 function forceSingleEntryMode() {
   entryMode = 'single';
@@ -3547,7 +3683,7 @@ function forceSingleEntryMode() {
 }
 function setEntryMode(m) {
   entryMode = (m === 'multi') ? 'multi' : 'single';
-  if (entryMode === 'multi' && editingId) cancelEdit();   // 多列＝純新增，先離開編輯
+  if (entryMode === 'multi') { if (editingGid) cancelGroupEdit(); else if (editingId) cancelEdit(); }   // 多列＝純新增，先離開編輯/群組編輯
   document.getElementById('entry-form').style.display = entryMode === 'multi' ? 'none' : '';
   document.getElementById('multi-entry').style.display = entryMode === 'multi' ? '' : 'none';
   if (entryMode === 'multi') {
@@ -3633,6 +3769,7 @@ function clearSelection() { selectedIds.clear(); renderTxns(); renderBatchBar();
 function exitSelectMode() {
   selectMode = false;
   selectedIds.clear();
+  if (editingGid) cancelGroupEdit();   // 🧾 換 data（匯入/還原/清除）一併退出群組編輯，避免 gid 懸空 / 表單殘留
   const btn = document.getElementById('select-toggle');
   if (btn) { btn.textContent = '☑️ 選取'; btn.classList.remove('active'); }
   renderBatchBar();
@@ -3903,6 +4040,58 @@ function runGidGroupSelfTest() {
   ok(sd.txns[0].gid === 'g1', 'sanitizeImport：合法 gid 保留');
   ok(!('gid' in sd.txns[1]) && !('gid' in sd.txns[3]), 'sanitizeImport：物件/注入字串 gid 剝除');
   ok(!('gid' in sd.txns[2]), 'sanitizeImport：topup 的 gid 剝除');
+
+  // ---- 整組編輯 / 事後拆分 reconcileGroupRows（純函式）----
+  const G = (id, gid, extra) => Object.assign({ id, type: 'expense', date: '2026-07-04', account: 'card', cat: '飲食', subcat: '', item: 'x', amount: 100, gid }, extra || {});
+  const base = [G('m1', 'g1'), G('m2', 'g1'), G('m3', 'g1'), { id: 'o1', type: 'expense', date: '2026-07-04', account: 'card', cat: '交通', item: '車', amount: 50 }];
+  const shared = { date: '2026-07-05', account: 'cash', note: 'n' };
+
+  // (1) 改一列 + (3) 刪一列（保留 m1 改金額、m2 保留、刪 m3）
+  const r1 = reconcileGroupRows(base, 'g1', ['m1', 'm2', 'm3'], shared,
+    [{ id: 'm1', cat: '飲食', subcat: '', item: '早餐', amount: 80 }, { id: 'm2', cat: '飲食', subcat: '', item: 'x', amount: 100 }]);
+  ok(r1.txns.filter(t => t.gid === 'g1').length === 2, 'reconcile：改+刪後組剩 2 筆');
+  ok(!r1.txns.some(t => t.id === 'm3'), 'reconcile：被移除的列已刪除');
+  const m1n = r1.txns.find(t => t.id === 'm1');
+  ok(m1n && m1n.item === '早餐' && m1n.amount === 80 && m1n.date === '2026-07-05' && m1n.account === 'cash' && m1n.note === 'n', 'reconcile：既有列就地覆蓋欄位+套用共用表頭');
+  ok(r1.txns.some(t => t.id === 'o1' && t.amount === 50 && !t.gid), 'reconcile：組外筆完全不動');
+
+  // (2) 加一列（保留全部 + 新增一列無 id）
+  const r2 = reconcileGroupRows(base, 'g1', ['m1', 'm2', 'm3'], shared,
+    [{ id: 'm1', cat: '飲食', item: 'x', amount: 100 }, { id: 'm2', cat: '飲食', item: 'x', amount: 100 }, { id: 'm3', cat: '飲食', item: 'x', amount: 100 }, { cat: '購物', item: '新', amount: 30 }]);
+  ok(r2.txns.filter(t => t.gid === 'g1').length === 4, 'reconcile：加一列後組 4 筆');
+  const added = r2.txns.find(t => t.item === '新');
+  ok(added && added.gid === 'g1' && added.id && !['m1', 'm2', 'm3'].includes(added.id), 'reconcile：新列有新 id 並掛 gid');
+  ok(r2.lastId === added.id, 'reconcile：lastId 指向新列');
+
+  // (4) 退化到 1 列 → finalGid=null，存活筆清 gid
+  const r3 = reconcileGroupRows(base, 'g1', ['m1', 'm2', 'm3'], shared, [{ id: 'm1', cat: '飲食', item: 'x', amount: 100 }]);
+  ok(r3.txns.filter(t => t.gid === 'g1').length === 0, 'reconcile：退化到 1 列組解散');
+  const surv = r3.txns.find(t => t.id === 'm1');
+  ok(surv && !('gid' in surv), 'reconcile：退化存活筆清 gid（顯示為單筆）');
+  ok(!r3.txns.some(t => t.id === 'm2' || t.id === 'm3'), 'reconcile：其餘成員刪除');
+
+  // (5) 原成員全刪 + 全新列（≥2）→ 舊刪、新列成組、組外仍在
+  const r4 = reconcileGroupRows(base, 'g1', ['m1', 'm2', 'm3'], shared, [{ cat: 'A', item: 'a', amount: 10 }, { cat: 'B', item: 'b', amount: 20 }]);
+  ok(!r4.txns.some(t => ['m1', 'm2', 'm3'].includes(t.id)), 'reconcile：原成員全刪');
+  ok(r4.txns.filter(t => t.gid === 'g1').length === 2, 'reconcile：全新列成組（2 筆同 gid）');
+  ok(r4.txns.some(t => t.id === 'o1'), 'reconcile：組外筆仍在');
+
+  // ② 事後拆分：單筆(無 gid) 現鑄 newGid + 補一列 → 兩筆同 newGid、原 id 保留
+  const flat = [{ id: 's1', type: 'expense', date: '2026-07-04', account: 'card', cat: '超市', item: '發票', amount: 500 }, { id: 'o1', type: 'expense', date: '2026-07-04', account: 'card', cat: '交通', item: '車', amount: 50 }];
+  const r5 = reconcileGroupRows(flat, 'newg', ['s1'], { date: '2026-07-04', account: 'card', note: '' },
+    [{ id: 's1', cat: '食品', item: '食品', amount: 300 }, { cat: '日用', item: '日用', amount: 200 }]);
+  const s1n = r5.txns.find(t => t.id === 's1');
+  ok(s1n && s1n.gid === 'newg' && s1n.cat === '食品' && s1n.amount === 300, 'reconcile②：原筆保留 id 並升級掛 gid');
+  ok(r5.txns.filter(t => t.gid === 'newg').length === 2, 'reconcile②：升級後成組 2 筆');
+  ok(r5.txns.some(t => t.id === 'o1' && !t.gid), 'reconcile②：其他單筆不受影響');
+
+  // ② 只保留 1 列（沒補）→ 原筆不掛 gid
+  const r6 = reconcileGroupRows(flat, 'newg2', ['s1'], { date: '2026-07-04', account: 'card', note: '' }, [{ id: 's1', cat: '超市', item: '發票', amount: 500 }]);
+  ok(!r6.txns.some(t => t.gid === 'newg2'), 'reconcile②：只 1 列不成組（原筆維持單筆）');
+
+  // parseSplitFormRows 攜帶列 id（reconcile 映射用；新列 id=undefined）
+  const prId = parseSplitFormRows([{ id: 'x1', cat: '食', item: 'a', amount: 10 }, { cat: '衣', item: 'b', amount: 20 }]);
+  ok(prId.valid.length === 2 && prId.valid[0].id === 'x1' && prId.valid[1].id === undefined, 'parseSplitFormRows：攜帶列 id（新列 id=undefined）');
 
   return { pass, fail, fails };
 }
