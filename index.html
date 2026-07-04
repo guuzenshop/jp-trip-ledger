@@ -1435,6 +1435,7 @@ function toggleSummaryHiddenItem(id) {
 let _inlineEditId = null;        // 目前正在編輯的 txn id（同時僅一筆）
 let _summaryExpandedCat = null;  // 總結卡分類佔比表目前展開的大類 key
 let _drillCtx = null;            // 分析面板目前鑽取的 {mode, key}
+let drillSort = 'date_desc';     // 鑽取明細排序（頁面存活期間沿用；✏️ 編輯重繪不重置）
 function rerenderInline(ctx) {
   if (ctx === 'drill') { if (_drillCtx) renderDrilldown(_drillCtx.mode, _drillCtx.key); else renderAnalysisPanel(); }
   else { renderSummary(); }
@@ -1942,20 +1943,52 @@ function groupByCatCore(rows) {           // rows: [{ t, cat, twd }]
   }
   return Object.values(m).sort((x, y) => y.sum - x.sum);
 }
+// 純函式：鑽取明細排序（rows: [{ t:{date,id}, twd }]；不碰 data、不換算，可離線單測）
+// manual＝保留傳入順序（txnsForKey 用 filter 產生子集，天然保留 data.txns 相對順序＝主明細✋的唯讀投影）
+// date 比較子與原鑽取排序同構：同日平手靠穩定排序保留傳入順序（預設 date_desc 零視覺回歸）
+function sortDrillCore(rows, mode) {
+  const r = rows.slice();
+  if (mode === 'manual') return r;
+  if (mode === 'amt_desc' || mode === 'amt_asc') {
+    r.sort((a, b) => {
+      const d = b.twd - a.twd;
+      if (d !== 0) return mode === 'amt_desc' ? d : -d;
+      return a.t.id < b.t.id ? 1 : -1;      // 平手依 id（同主明細金額排序慣例，確定性）
+    });
+    return r;
+  }
+  const asc = mode === 'date_asc';
+  r.sort((a, b) => a.t.date < b.t.date ? (asc ? -1 : 1) : (a.t.date > b.t.date ? (asc ? 1 : -1) : 0));
+  return r;
+}
+function setDrillSort(v) {
+  drillSort = v;
+  if (_drillCtx) renderDrilldown(_drillCtx.mode, _drillCtx.key);
+}
+function drillSortStripHTML() {
+  const P = [['date_desc', '📅 最新優先'], ['date_asc', '📅 最舊優先'],
+             ['amt_desc', '💰 金額高→低'], ['amt_asc', '💰 金額低→高'], ['manual', '✋ 自訂順序']];
+  let html = `<div class="date-strip drill-sort-strip">` + P.map(p =>
+    `<button class="date-chip ${drillSort === p[0] ? 'active' : ''}" data-ds="${p[0]}" onclick="setDrillSort('${p[0]}')">${p[1]}</button>`).join('') + `</div>`;
+  if (drillSort === 'manual')
+    html += `<div class="hint" style="margin:-4px 4px 8px">✋ 照主明細的自訂順序顯示；要調整順序請回主明細拖曳。</div>`;
+  return html;
+}
 function renderDrilldown(mode, key) {
   _drillCtx = { mode, key };
   const body = document.getElementById('analysis-body');
   if (!body) return;
-  const list = txnsForKey(mode, key).slice().sort((a, b) => a.date < b.date ? 1 : (a.date > b.date ? -1 : 0));
+  const base = txnsForKey(mode, key);       // 保留 data.txns 相對順序（manual 的基準），排序交給 sortDrillCore
   let sum = 0;
-  for (const t of list) { const a = acctById(t.account); if (a) sum += toTWD(Number(t.amount) || 0, a.currency); }
+  for (const t of base) { const a = acctById(t.account); if (a) sum += toTWD(Number(t.amount) || 0, a.currency); }
   let html = `<div class="drill-head"><button class="btn btn-sm" onclick="renderAnalysisPanel()">← 返回分析</button>` +
-    `<span class="drill-title">${escapeHtml(drillLabel(mode, key))}　<b>${list.length} 筆</b>　${fmt(sum, 'TWD')}</span></div>`;
-  if (!list.length) { html += '<div class="empty">沒有符合的記錄。</div>'; body.innerHTML = html; return; }
-  if (mode === 'pay') {                     // 支付方式：依大分類分組＋每組小計（其餘視圖維持平鋪）
-    const rows = list.map(t => { const a = acctById(t.account);
-      return { t, cat: t.cat || '未分類', twd: toTWD(Number(t.amount) || 0, a ? a.currency : 'JPY') }; });
-    const groups = groupByCatCore(rows);
+    `<span class="drill-title">${escapeHtml(drillLabel(mode, key))}　<b>${base.length} 筆</b>　${fmt(sum, 'TWD')}</span></div>`;
+  if (!base.length) { html += '<div class="empty">沒有符合的記錄。</div>'; body.innerHTML = html; return; }
+  html += drillSortStripHTML();
+  const rows = sortDrillCore(base.map(t => { const a = acctById(t.account);
+    return { t, cat: t.cat || '未分類', twd: toTWD(Number(t.amount) || 0, a ? a.currency : 'JPY') }; }), drillSort);
+  if (mode === 'pay') {                     // 支付方式：分組恆在（組序小計大→小），排序只作用組內（其餘視圖平鋪）
+    const groups = groupByCatCore(rows);    // 組內保留傳入順序＝承接 sortDrillCore 結果
     html += `<div class="txn-list">` + groups.map(g =>
       `<div class="drill-cat-head"><span class="drill-cat-name">` +
         `<span class="chk-dot" style="background:${colorForKey(g.cat)}"></span>${escapeHtml(g.cat)}</span>` +
@@ -1963,7 +1996,7 @@ function renderDrilldown(mode, key) {
       g.rows.map(r => drillRowHTML(r.t)).join('')
     ).join('') + `</div>`;
   } else {
-    html += `<div class="txn-list">${list.map(drillRowHTML).join('')}</div>`;
+    html += `<div class="txn-list">${rows.map(r => drillRowHTML(r.t)).join('')}</div>`;
   }
   body.innerHTML = html;
 }
@@ -3489,15 +3522,44 @@ function runDrillGroupSelfTest() {
   ok(groupByCatCore([]).length === 0, '空輸入→空陣列');
   return { pass, fail, fails };
 }
-/* ?test=1：核心自測硬 gate（分帳 23 案 + 手續費/批量/多列 案 + 支付分組案）*/
+// ?test=1 自測（鑽取排序膠囊 純函式）
+function runDrillSortSelfTest() {
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (c, n) => { if (c) pass++; else { fail++; fails.push(n); } };
+  const R = (id, date, twd) => ({ t: { id, date }, twd });
+  const ids = (arr) => arr.map(r => r.t.id).join(',');
+  // 傳入順序＝data.txns 相對順序（刻意非日期序；金額全不平手 — 教訓：測排序別用平手資料）
+  const rows = [R('b', '2026-07-02', 300), R('a', '2026-07-01', 500), R('d', '2026-07-03', 100), R('c', '2026-07-02', 200)];
+  ok(ids(sortDrillCore(rows, 'date_desc')) === 'd,b,c,a', 'date_desc：日期新→舊、同日保插入序');
+  ok(ids(sortDrillCore(rows, 'date_asc')) === 'a,b,c,d', 'date_asc：日期舊→新、同日保插入序');
+  ok(ids(sortDrillCore(rows, 'amt_desc')) === 'a,b,c,d', 'amt_desc：金額高→低');
+  ok(ids(sortDrillCore(rows, 'amt_asc')) === 'd,c,b,a', 'amt_asc：金額低→高');
+  ok(ids(sortDrillCore(rows, 'manual')) === 'b,a,d,c', 'manual：保留傳入順序（唯讀投影）');
+  ok(ids(rows) === 'b,a,d,c', '純函式不改動輸入陣列');
+  const tie = [R('x', '2026-07-01', 100), R('y', '2026-07-02', 100)];
+  ok(ids(sortDrillCore(tie, 'amt_desc')) === 'y,x', '金額平手→依 id 確定性排序');
+  // 與 groupByCatCore 組合：排序後分組 → 組序仍小計大→小、組內承接排序
+  const rows2 = [
+    { t: { id: 'p', date: '2026-07-01' }, cat: '飲食', twd: 100 },
+    { t: { id: 'q', date: '2026-07-02' }, cat: '交通', twd: 400 },
+    { t: { id: 'r', date: '2026-07-03' }, cat: '飲食', twd: 250 }
+  ];
+  const g = groupByCatCore(sortDrillCore(rows2, 'amt_desc'));
+  ok(g[0].cat === '交通' && g[1].cat === '飲食', '排序不影響組序（仍小計大→小）');
+  ok(g[1].rows.map(r => r.t.id).join(',') === 'r,p', '組內承接金額高→低');
+  ok(sortDrillCore([], 'date_desc').length === 0, '空輸入→空陣列');
+  return { pass, fail, fails };
+}
+/* ?test=1：核心自測硬 gate（分帳 23 案 + 手續費/批量/多列 案 + 支付分組案 + 鑽取排序案）*/
 try {
   if (location.search.indexOf('test=1') >= 0) {
     const tr = runSplitSelfTest();
     const tr2 = runBatchFeeSelfTest();
     const tr3 = runDrillGroupSelfTest();
-    const fail = tr.fail + tr2.fail + tr3.fail;
-    const fails = tr.fails.concat(tr2.fails, tr3.fails);
-    const pass = tr.pass + tr2.pass + tr3.pass;
+    const tr4 = runDrillSortSelfTest();
+    const fail = tr.fail + tr2.fail + tr3.fail + tr4.fail;
+    const fails = tr.fails.concat(tr2.fails, tr3.fails, tr4.fails);
+    const pass = tr.pass + tr2.pass + tr3.pass + tr4.pass;
     if (fail > 0) { console.error('自測 FAIL', fails); toast('⚠️ 自測失敗：\n' + fails.join('\n')); }
     else { console.log('自測 PASS ' + pass + ' / FAIL 0'); toast('✅ 自測全數通過（' + pass + ' 案）'); }
   }

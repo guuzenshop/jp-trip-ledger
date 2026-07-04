@@ -2,7 +2,7 @@
    策略：app 本體（index.html）網路優先、離線回退快取；
    匯率等跨源請求一律放行，離線失敗時由 App 既有 try-catch 優雅降級。 */
 // ⚠️ 改動 shell 資產（manifest/icon）時順手 +1 版本號，確保舊快取被清除
-const CACHE = 'jp-ledger-v12';
+const CACHE = 'jp-ledger-v13';
 const SHELL = ['./', './index.html', './manifest.json', './icon.svg', './icon-512.png'];
 
 self.addEventListener('install', e => {
