@@ -1284,7 +1284,7 @@ function buildFeeTxn(o) {
     account: o.account,
     cat: FEE_CAT,
     subcat: o.type || '',
-    item: '手續費' + (o.baseLabel ? ' · ' + o.baseLabel : ''),
+    item: o.baseLabel || '手續費',   // 名稱＝主項目名稱（分類已標為手續費大項＋小項，故不再前綴「手續費」）
     amount: Number.isFinite(amt) ? amt : 0,
     note: o.note || ''
   };
