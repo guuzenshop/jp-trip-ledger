@@ -176,6 +176,9 @@
     padding:20px; width:100%; max-width:580px; margin:auto; }
   .modal h2 { font-size:17px; margin:0 0 16px; }
   .acct-edit { display:grid; grid-template-columns:1.4fr .8fr 1fr 1fr auto; gap:6px; align-items:center; margin-bottom:6px; }
+  .acct-reorder { display:flex; gap:4px; align-items:center; }
+  .acct-reorder .btn { padding:5px 7px; font-size:12px; line-height:1; }
+  .acct-reorder .btn:disabled { opacity:.35; cursor:default; }
   .acct-edit input,.acct-edit select { padding:7px 8px; font-size:13px; }
   .modal-section { border-top:1px solid var(--line); margin-top:18px; padding-top:16px; }
   .modal-section h3 { font-size:14px; margin:0 0 10px; color:var(--muted); }
@@ -2245,10 +2248,10 @@ function makeTxnDiv(t, showDate, withHandle) {
 }
 
 // 單筆操作：桌機並排；手機收合成「⋯」，點開選 複製/(拆分)/編輯/刪除
-// 「🧾 拆分這筆」只對「未成組的一般 expense（排除手續費筆）」出現＝事後把單筆升級成拆分組
+// 「🧾 拆分這筆」對所有「未成組的 expense」出現（含手續費筆，與一般記錄按鈕一致）＝事後把單筆升級成拆分組
 function opsHTML(t) {
   const id = t.id;
-  const canSplit = t.type === 'expense' && !isGrouped(t) && t.cat !== FEE_CAT;
+  const canSplit = t.type === 'expense' && !isGrouped(t);
   return '<div class="ops">' +
     '<button class="btn btn-sm btn-icon ops-toggle" title="操作" aria-label="更多操作" onclick="toggleOps(event,this)">⋯</button>' +
     '<div class="ops-menu">' +
@@ -2786,9 +2789,32 @@ function renderAcctEditor() {
         <option value="credit" ${a.kind === 'credit' ? 'selected' : ''}>信用卡</option>
       </select>
       <input type="number" value="${escapeHtml(a.initial)}" data-i="${i}" data-k="initial" placeholder="初始" title="初始/原有金額" />
-      <button class="btn btn-sm btn-danger" onclick="removeAccount(${i})">✕</button>`;
+      <div class="acct-reorder">
+        <button class="btn btn-sm" title="上移一格（改變餘額卡顯示順序）" aria-label="上移一格" onclick="moveAccount(${i},-1)" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="btn btn-sm" title="下移一格（改變餘額卡顯示順序）" aria-label="下移一格" onclick="moveAccount(${i},1)" ${i === data.accounts.length - 1 ? 'disabled' : ''}>▼</button>
+        <button class="btn btn-sm btn-danger" title="移除帳戶" aria-label="移除帳戶" onclick="removeAccount(${i})">✕</button>
+      </div>`;
     el.appendChild(row);
   });
+}
+// 讀回帳戶編輯器中目前輸入的值到 data.accounts（重繪前先保存未存的編輯，避免遺失）
+function flushAcctEditorInputs() {
+  document.querySelectorAll('#acct-editor [data-i]').forEach(inp => {
+    const i = +inp.dataset.i, k = inp.dataset.k;
+    let v = inp.value;
+    if (k === 'initial') v = Number(v) || 0;
+    if (k === 'name') v = v.trim() || '未命名';
+    if (data.accounts[i]) data.accounts[i][k] = v;
+  });
+}
+// 帳戶上移／下移一格（dir=-1 上、1 下）：只改 data.accounts 順序＝改變餘額卡與下拉的顯示順序；
+// 明細以帳戶 id 參照，重排陣列不影響任何已記錄的明細。順序於「儲存」時一併寫入。
+function moveAccount(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= data.accounts.length) return;
+  flushAcctEditorInputs();               // 先保存本列與其他列未存的編輯
+  [data.accounts[i], data.accounts[j]] = [data.accounts[j], data.accounts[i]];
+  renderAcctEditor();
 }
 function addAccountRow() {
   data.accounts.push({ id: genId(), name: '新帳戶', currency: 'JPY', kind: 'prepaid', initial: 0, color: PALETTE[data.accounts.length % PALETTE.length] });
@@ -2817,13 +2843,7 @@ function parseCats(text) {
   return obj;
 }
 function saveSettings() {
-  document.querySelectorAll('#acct-editor [data-i]').forEach(inp => {
-    const i = +inp.dataset.i, k = inp.dataset.k;
-    let v = inp.value;
-    if (k === 'initial') v = Number(v) || 0;
-    if (k === 'name') v = v.trim() || '未命名';
-    data.accounts[i][k] = v;
-  });
+  flushAcctEditorInputs();
   const ln = (document.getElementById('s-ledger-name').value || '').trim().slice(0, 80);
   data.ledgerName = ln || '旅行記帳';
   const r = Number(document.getElementById('s-rate').value);
