@@ -1377,7 +1377,8 @@ let _batchModalApply = null;       // 批量 modal 套用 callback
    下次載入時若鏡射與 store 內容不同，代表舊版在離線時改過 → 以鏡射為準（救回離線編輯）。 */
 function normalizeLedger(d) {
   const l = normalizeLedgerFields(d);
-  if (!l.id || typeof l.id !== 'string') l.id = genId();
+  // id 白名單：帳本 id 會被嵌入 onclick 屬性，非法字元一律重發（縱深防禦，堵死匯入注入）
+  if (typeof l.id !== 'string' || !/^[a-z0-9]{1,32}$/i.test(l.id)) l.id = genId();
   if (!l.createdAt) l.createdAt = today();
   l.archived = !!l.archived;
   return l;
@@ -5107,6 +5108,10 @@ function runCurrencySelfTest() {
   ok(L.rates.JPY === 4.98, 'normalizeLedger：沿用多幣別遷移');
   const L2 = normalizeLedger(L);
   ok(L2.id === L.id && L2.createdAt === L.createdAt, 'normalizeLedger：冪等（既有 id/createdAt 不被換掉）');
+  const evil = normalizeLedger({ id: "x');alert(1);//", ledgerName: 'x', accounts: [], txns: [] });
+  ok(/^[a-z0-9]{1,32}$/i.test(evil.id), 'normalizeLedger：非法 id 重發（帳本 id 會進 onclick，堵匯入注入）');
+  const evil2 = normalizeLedger({ id: 'a'.repeat(64), ledgerName: 'x', accounts: [], txns: [] });
+  ok(evil2.id.length <= 32, 'normalizeLedger：超長 id 重發');
   const st = ledgerStat(L);
   ok(st.count === 2, 'ledgerStat：只算消費筆數（轉帳不計）');
   ok(st.range === '2026-07-01 ~ 2026-07-03', 'ledgerStat：日期範圍取最早～最晚');
