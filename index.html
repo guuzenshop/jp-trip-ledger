@@ -925,6 +925,7 @@
 /* ===================== 資料層 ===================== */
 const STORE_KEY = 'jp_trip_ledger_v2';        // legacy 鏡射（單一帳本；舊版 App／舊快取仍可讀寫）
 const STORE_KEY_V3 = 'jp_trip_ledger_v3';     // 多帳本 store（真相源）
+const WIP_KEY = 'jp_trip_ledger_wip';         // 存檔進行中旗標（v3 與 v2 鏡射之間被中斷的偵測）
 const KEYSEP = String.fromCharCode(0); // 小項複合鍵分隔符（NUL，使用者不可能輸入；不回拆、僅當 Map 鍵）
 const FEE_CAT = '手續費';               // 手續費大項（單一真相源；類型＝其小項，於設定的「消費分類」編輯）
 const DEFAULT_FEE_TYPES = ['信用卡手續費', 'ATM提領', '跨行轉帳', '匯差', '其他'];
@@ -1193,14 +1194,32 @@ function computeSettlement(members, splits, targetCur, rates) {
 // 淨化（import 與 load 共用，冪等）：members/splits 型別淨化 + 標記 _needsReview / _rateUnknown
 function normalizeSplitData(d) {
   const seenM = new Set();
+  // 成員 id 白名單（含長度上限，與帳本/gid 一致）。撞號或非法值一律重發，
+  // 並記錄 舊id→新id 對照：splits 以成員 id 當參照（payerId/participants）與**物件鍵**（amounts/shares），
+  // 不同步 remap 就會在下面的 memberIds 過濾被靜默丟掉分攤者 → 結算數字失真且不可逆。
+  const idMap = Object.create(null);
   d.members = (Array.isArray(d.members) ? d.members : []).map(m => {
-    let id = /^[a-z0-9]+$/i.test((m && m.id) || '') ? m.id : genId();
+    const oldId = String((m && m.id) != null ? m.id : '');
+    let id = /^[a-z0-9]{1,32}$/i.test(oldId) ? oldId : genId();
     while (seenM.has(id)) id = genId();
     seenM.add(id);
+    if (oldId && oldId !== id) idMap[oldId] = id;
     const name = (m && typeof m.name === 'string' && m.name.trim()) ? m.name.trim().slice(0, 40) : '成員';
     return { id, name };
   });
   const memberIds = new Set(d.members.map(m => m.id));
+  const remapId = k => { const s = String(k); return Object.prototype.hasOwnProperty.call(idMap, s) ? idMap[s] : s; };
+  // 物件鍵的 remap（amounts/shares）：必須在 cleanMap 依 memberIds 過濾**之前**做
+  const remapKeys = obj => {
+    const out = Object.create(null);
+    if (obj && typeof obj === 'object') {
+      for (const k of Object.keys(obj)) {
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+        out[remapId(k)] = obj[k];
+      }
+    }
+    return out;
+  };
   // 缺匯率時的估算值：優先取該幣別目前匯率表；日圓另有舊單一 rate 可退（其餘退 1 並標「匯率估算」）
   const fallbackRateFor = (c) => {
     if (c === HOME_CUR) return 1;
@@ -1220,10 +1239,12 @@ function normalizeSplitData(d) {
     let rate = Number(s.rate), rateUnknown = false;
     if (!Number.isFinite(rate) || rate <= 0) { rate = fallbackRateFor(currency); rateUnknown = true; }
     const mode = ['equal', 'amount', 'shares'].includes(s.mode) ? s.mode : 'equal';
-    const payerId = memberIds.has(s.payerId) ? s.payerId : '';
-    const participants = Array.isArray(s.participants) ? s.participants.filter(id => memberIds.has(id)) : [];
-    const amounts = cleanMap(s.amounts, memberIds);
-    const shares = cleanMap(s.shares, memberIds);
+    // 先 remap（成員 id 若被重發）再依 memberIds 過濾，順序反了就會把分攤者洗掉
+    const payerRaw = remapId(s.payerId != null ? s.payerId : '');
+    const payerId = memberIds.has(payerRaw) ? payerRaw : '';
+    const participants = Array.isArray(s.participants) ? s.participants.map(remapId).filter(id => memberIds.has(id)) : [];
+    const amounts = cleanMap(remapKeys(s.amounts), memberIds);
+    const shares = cleanMap(remapKeys(s.shares), memberIds);
     const item = (typeof s.item === 'string') ? s.item.slice(0, 80) : '';
     const note = (typeof s.note === 'string') ? s.note.slice(0, 200) : '';
     const date = /^\d{4}-\d{2}-\d{2}$/.test(s.date || '') ? s.date : today();
@@ -1440,7 +1461,15 @@ function loadStore() {
       _savedAt: Number(s._savedAt) || 0
     };
     // 離線舊版救援：鏡射有 id 且內容與 store 內同一本不同 → 鏡射較新（本 App 每次 save 都寫成一致）
-    if (legacy && typeof legacy.id === 'string') {
+    // ⚠️ 前提是「兩份一定同時寫成功」。若 WIP_KEY 殘留＝上次寫入被中斷（v3 已新、鏡射還舊），
+    //    此時鏡射是過期的，不能拿來覆蓋 v3；直接放棄救援並提醒使用者。
+    let wip = false;
+    try { wip = localStorage.getItem(WIP_KEY) === '1'; } catch (e) {}
+    if (wip) {
+      try { localStorage.removeItem(WIP_KEY); } catch (e) {}
+      setTimeout(() => toast('上次存檔似乎被中斷（App 被系統關閉？），已以主檔為準。請確認最後一筆記錄是否還在。'), 900);
+    }
+    if (!wip && legacy && typeof legacy.id === 'string') {
       const i = store.ledgers.findIndex(l => l.id === legacy.id);
       if (i >= 0) {
         const mirrored = normalizeLedger(legacy);
@@ -1543,11 +1572,19 @@ function save() {
   else if (rec) toast('偵測到其他分頁的變更，已一併保留');
   store._savedAt = Date.now();
   data._savedAt = store._savedAt;
+  // 寫入中旗標：v3 與 v2 鏡射是兩次獨立 setItem，中間若分頁被殺（PWA 背景回收／OOM／當機）
+  // 會留下「v3 新、v2 舊」的組合。舊版離線編輯不會動 _savedAt，故時間戳分不出這兩種成因；
+  // 用這支旗標精確區分：載入時看到殘留旗標 ⇒ 上次寫入被中斷 ⇒ 一律不信鏡射。
+  try { localStorage.setItem(WIP_KEY, '1'); } catch (e) {}
   try { localStorage.setItem(STORE_KEY_V3, JSON.stringify(store)); }
-  catch (e) { toast('儲存失敗，可能空間不足：' + e.message); return; }
+  catch (e) {
+    try { localStorage.removeItem(WIP_KEY); } catch (e2) {}
+    toast('儲存失敗，可能空間不足：' + e.message); return;
+  }
   // legacy 鏡射（目前這本，舊格式）；寫失敗就清掉，避免殘留舊內容在下次載入被誤判為「較新」
   try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
   catch (e) { try { localStorage.removeItem(STORE_KEY); } catch (e2) {} }
+  try { localStorage.removeItem(WIP_KEY); } catch (e) {}   // 兩份都寫完 → 一致，旗標清除
 }
 // 單一 gid 的全帳本筆數（lazy 快取；角標判定用）
 function gidCountOf(gid) {
@@ -2124,6 +2161,13 @@ function rateAgeDays(s, nowMs) {
   return Number.isFinite(days) && days >= 0 ? days : null;
 }
 const RATE_STALE_DAYS = 7;         // 超過幾天未成功更新就提醒（自動來源可能已失效）
+// 使用中（帳戶或分帳費用）但沒有匯率的幣別：換算會靜默退回 1:1，必須讓使用者看得見
+function missingRateCurs() {
+  const used = [];
+  for (const a of (data.accounts || [])) if (a.currency && a.currency !== HOME_CUR && used.indexOf(a.currency) < 0) used.push(a.currency);
+  for (const s of (data.splits || [])) if (s.currency && s.currency !== HOME_CUR && used.indexOf(s.currency) < 0) used.push(s.currency);
+  return used.filter(c => !(Number((data.rates || {})[c]) > 0));
+}
 // 匯率摘要（提示文字用）：例「1 台幣 ≒ ¥4.98、$0.032」
 function rateSummaryText() {
   const curs = foreignCursInUse();
@@ -2140,9 +2184,11 @@ function renderRate() {
     return `1 元台幣 ≒ ${curSym(c)}${r}　|　${curSym(c)}${ref} ≒ NT$${(ref / r).toFixed(1)}`;
   }).join('<br>');
   const age = rateAgeDays(data.rateUpdatedAt);
+  const miss = missingRateCurs();
   document.getElementById('rate-src').textContent = '來源：' + (data.rateSource || '手動')
     + (data.rateUpdatedAt ? '（' + data.rateUpdatedAt + '）' : '')
-    + (age !== null && age >= RATE_STALE_DAYS ? `　⚠️ 已 ${age} 天未更新` : '');
+    + (age !== null && age >= RATE_STALE_DAYS ? `　⚠️ 已 ${age} 天未更新` : '')
+    + (miss.length ? `　⚠️ ${miss.map(curName).join('、')} 尚未設定匯率，暫以 1:1 計算` : '');
 }
 
 function renderAccounts() {
@@ -3257,7 +3303,14 @@ function parseBotCsv(text) {
     const si = parts.findIndex(p => /^(selling|本行賣出)$/i.test(String(p || '').trim()));
     if (si < 0) continue;                                   // 沒有賣出標記 → 不猜
     const cashSell = parseFloat(parts[si + 1]);             // 賣出區塊第一欄＝現金
-    if (Number.isFinite(cashSell) && cashSell > 0) out[code] = cashSell;
+    if (!(Number.isFinite(cashSell) && cashSell > 0)) continue;
+    // 結構自檢（取代「per-currency 數值帶」）：台銀報價恆滿足 現金賣出 ≥ 即期賣出 > 現金買入。
+    // 取錯欄（誤抓即期或買入側）會破壞此序 → 寧可不更新，也不寫入看似合理的錯值。
+    const spotSell = parseFloat(parts[si + 2]);
+    const cashBuy = parseFloat(parts[2]);
+    if (Number.isFinite(spotSell) && spotSell > 0 && cashSell < spotSell) continue;
+    if (Number.isFinite(cashBuy) && cashBuy > 0 && cashSell <= cashBuy) continue;
+    out[code] = cashSell;
   }
   return out;
 }
@@ -5274,16 +5327,17 @@ function runCurrencySelfTest() {
   } finally { data = _bak; }
 
   // ⑤ 台銀 CSV 解析（含無現金報價、雜訊列）
+  // 取自 2026-07-19 即時台銀 flcsv 的真實數值（現金賣出 > 即期賣出 > 現金買入）
   const csv = [
     '幣別,匯率,現金,即期,遠期10天,遠期30天,遠期60天,遠期90天,遠期120天,遠期150天,遠期180天,匯率,現金,即期',
-    'USD,本行買入,30.5,30.9,0,0,0,0,0,0,0,本行賣出,31.4,31.05',
-    'JPY,本行買入,0.1950,0.1990,0,0,0,0,0,0,0,本行賣出,0.2008,0.2030',
-    'KRW,本行買入,0,0.0210,0,0,0,0,0,0,0,本行賣出,0,0.0225',
+    'USD,本行買入,31.89,32.215,0,0,0,0,0,0,0,本行賣出,32.56,32.365',
+    'JPY,本行買入,0.18970,0.19650,0,0,0,0,0,0,0,本行賣出,0.20250,0.20150',
+    'ZAR,本行買入,0,1.914,0,0,0,0,0,0,0,本行賣出,0,2.004',
     ',,,,,,,,,,,,,',
   ].join('\n');
   const bot = parseBotCsv(csv);
-  ok(bot.USD === 31.4 && bot.JPY === 0.2008, 'parseBotCsv：取現金賣出欄（1 該幣 = ? 台幣）');
-  ok(bot.KRW === undefined, 'parseBotCsv：無現金報價的幣別略過（交給備援）');
+  ok(bot.USD === 32.56 && bot.JPY === 0.2025, 'parseBotCsv：取現金賣出欄（1 該幣 = ? 台幣）');
+  ok(bot.ZAR === undefined, 'parseBotCsv：無現金報價的幣別略過（留給手動輸入）');
   ok(bot['幣別'] === undefined && Object.keys(bot).length === 2, 'parseBotCsv：表頭與空列不入表');
   ok(Object.keys(parseBotCsv('')).length === 0 && Object.keys(parseBotCsv(null)).length === 0, 'parseBotCsv：空輸入不炸');
   ok(normRate(1 / 0.2008) === 4.9801, 'normRate：日圓沿用 4 位小數（與舊版同值）');
@@ -5292,6 +5346,13 @@ function runCurrencySelfTest() {
   ok(rateSane(50, 4.98) === false && rateSane(0.5, 4.98) === false, 'rateSane：偏離逾 50% 擋下');
   ok(rateSane(0.0318, 1) === true, 'rateSane：現值為 1（新增幣別佔位）不設限');
   ok(rateSane(0.0318, null) === true && rateSane(0, 4.98) === false, 'rateSane：無現值放行、非正值擋下');
+  // 台銀報價結構自檢：現金賣出 ≥ 即期賣出 > 現金買入；破壞此序＝取錯欄 → 不更新
+  ok(parseBotCsv('JPY,Buying,0.18970,0.19650,0,0,0,0,0,0,0,Selling,0.20250,0.20150,')['JPY'] === 0.2025,
+     'parseBotCsv：真實列（現金賣出>即期賣出>現金買入）通過');
+  ok(parseBotCsv('JPY,Buying,0.18970,0.19650,0,0,0,0,0,0,0,Selling,0.19000,0.20150,')['JPY'] === undefined,
+     'parseBotCsv：賣出 < 即期賣出（疑似取到即期欄）→ 擋下');
+  ok(parseBotCsv('JPY,Buying,0.20250,0.19650,0,0,0,0,0,0,0,Selling,0.18000,')['JPY'] === undefined,
+     'parseBotCsv：賣出 ≤ 現金買入（疑似買賣顛倒）→ 擋下');
   ok(rateSane(1e6, 1) === false && rateSane(1e-6, 1) === false, 'rateSane：佔位 1 仍受絕對外框把關');
   ok(rateSane(719.4, 1) === true && rateSane(0.0225, 1) === true, 'rateSane：真實幣別極值（越南盾/英鎊）在外框內');
   // 賣出標記定位：欄位位移也取得對（不寫死索引）
@@ -5335,6 +5396,30 @@ function runCurrencySelfTest() {
   ok(ledgerFingerprint({ id: 'a', x: 1, _savedAt: 1 }) === ledgerFingerprint({ id: 'a', x: 1, _savedAt: 999 }),
      'ledgerFingerprint：忽略 _savedAt（避免只是存檔時間不同就誤判為衝突）');
   ok(ledgerFingerprint({ id: 'a', x: 1 }) !== ledgerFingerprint({ id: 'a', x: 2 }), 'ledgerFingerprint：內容不同即不同');
+
+  // ⑥-2 成員 id 重發時，splits 的參照與物件鍵必須同步 remap（否則分攤者被靜默丟掉）
+  const dRemap = normalizeSplitData({
+    members: [{ id: 'toolongid'.repeat(6), name: 'A' }, { id: 'b', name: 'B' }],   // 第一個超過 32 字元 → 重發
+    splits: [{
+      id: 's1', amount: 300, currency: 'TWD', rate: 1, mode: 'amount',
+      amounts: { ['toolongid'.repeat(6)]: 100, b: 200 },
+      participants: ['toolongid'.repeat(6), 'b'],
+      payerId: 'toolongid'.repeat(6), date: '2026-07-01'
+    }]
+  });
+  const newA = dRemap.members[0].id;
+  ok(/^[a-z0-9]{1,32}$/i.test(newA) && newA !== 'toolongid'.repeat(6), 'normalizeSplitData：超長成員 id 重發');
+  ok(dRemap.splits[0].payerId === newA, 'remap：payerId 跟著換');
+  ok(dRemap.splits[0].participants.length === 2 && dRemap.splits[0].participants.indexOf(newA) >= 0, 'remap：participants 跟著換（沒被過濾掉）');
+  ok(dRemap.splits[0].amounts[newA] === 100 && dRemap.splits[0].amounts.b === 200, 'remap：amounts 物件鍵跟著換');
+  ok(!dRemap.splits[0]._needsReview, 'remap：remap 後仍通過驗證（不會被誤標需檢查）');
+  // 撞號重發也走同一條 remap（這是本來就存在、未被覆蓋的路徑）
+  const dDup = normalizeSplitData({
+    members: [{ id: 'same', name: 'A' }, { id: 'same', name: 'B' }],
+    splits: [{ id: 's2', amount: 100, currency: 'TWD', rate: 1, mode: 'equal', participants: ['same'], payerId: 'same', date: '2026-07-01' }]
+  });
+  ok(dDup.members[0].id !== dDup.members[1].id, 'normalizeSplitData：撞號成員重發');
+  ok(dDup.splits[0].participants.length === 1, 'remap：撞號情境下分攤者仍在');
 
   // ⑦ 幣別最小單位（dp=0 與舊版位元相同；dp=2 精確到分）
   ok(curScale('JPY') === 1 && curScale('TWD') === 1 && curScale('USD') === 100, 'curScale：dp=0→1、dp=2→100');

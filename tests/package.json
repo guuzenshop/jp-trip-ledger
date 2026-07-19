@@ -1,0 +1,13 @@
+{
+  "name": "jp-trip-ledger-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "旅行記帳 PWA 的 jsdom 驗證腳本（App 本體為單檔 index.html，無建置流程）",
+  "scripts": {
+    "test": "node verify-mc.js ../index.html && node verify-ledger.js ../index.html && node verify-rate.js ../index.html",
+    "test:live-rate": "node verify-bot-live.js ../index.html"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

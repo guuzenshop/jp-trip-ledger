@@ -1,4 +1,4 @@
-# 部署 repo 只保留 app 本體，排除審查報告、暫存與其他雜項
+# 部署 repo 只保留 app 本體 + 可複現的驗證腳本，排除審查報告、真實帳務資料與暫存
 /*
 !/index.html
 !/README.md
@@ -7,3 +7,11 @@
 !/manifest.json
 !/icon.svg
 !/icon-512.png
+!/tests/
+# tests/ 內只收腳本本體；相依套件、比對用的舊版與真實資料一律不進版控
+/tests/node_modules/
+/tests/package-lock.json
+/tests/old.html
+/tests/*.json
+!/tests/package.json
+/tests/*.txt
