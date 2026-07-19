@@ -321,6 +321,18 @@
   .settle-note { font-size:11px; color:var(--muted); margin-top:8px; }
   .split-empty { text-align:center; color:var(--muted); padding:18px; font-size:13px; }
   .settle-cur-sel { width:auto; padding:6px 9px; font-size:13px; border-radius:8px; }
+  /* 帳本切換（標題）＋ 帳本管理 modal */
+  .ledger-switch { cursor:pointer; display:inline-flex; align-items:center; gap:6px; border-radius:10px; padding:2px 8px 2px 4px; }
+  .ledger-switch:hover { background:var(--panel2); }
+  .ledger-caret { font-size:13px; color:var(--muted); }
+  .ledger-row { display:flex; align-items:center; gap:8px; padding:9px 0; border-bottom:1px dashed var(--line); flex-wrap:wrap; }
+  .ledger-row:last-child { border-bottom:0; }
+  .ledger-row.active { background:rgba(52,211,153,.10); border-radius:10px; padding-left:8px; padding-right:8px; }
+  .ledger-row .lg-name { flex:1 1 150px; min-width:120px; padding:7px 8px; font-size:13.5px; }
+  .ledger-row .lg-meta { flex:1 1 100%; font-size:11.5px; color:var(--muted); padding-left:2px; }
+  .ledger-row .lg-ops { display:flex; gap:5px; flex-wrap:wrap; }
+  .ledger-row .lg-cur { font-size:11.5px; color:var(--green); font-weight:700; white-space:nowrap; }
+  .ledger-arch-head { margin-top:12px; font-size:12.5px; color:var(--muted); }
   /* 設定：多幣別匯率編輯列 */
   .rate-edit { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:7px 0; border-bottom:1px dashed var(--line); }
   .rate-edit:last-child { border-bottom:0; }
@@ -499,7 +511,8 @@
 <div class="wrap">
 
   <header>
-    <h1 id="app-title">✈️ 旅行記帳</h1>
+    <h1 id="app-title" class="ledger-switch" onclick="openLedgerModal()" title="切換／管理帳本" role="button" tabindex="0"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLedgerModal();}"><span id="app-title-text">✈️ 旅行記帳</span><span class="ledger-caret" aria-hidden="true">▾</span></h1>
     <button class="btn" onclick="openSettings()">⚙️ 設定</button>
   </header>
 
@@ -707,6 +720,39 @@
 
 </div>
 
+<!-- 帳本 Modal -->
+<div class="modal-bg" id="ledger-modal">
+  <div class="modal">
+    <h2>📚 帳本</h2>
+    <div class="hint">每趟旅程一本，各自獨立的帳戶、匯率、消費明細與分帳。直接修改名稱即可改名。</div>
+    <div id="ledger-list"></div>
+
+    <div id="ledger-add" style="display:none">
+      <div class="field">
+        <label>新帳本名稱</label>
+        <input type="text" id="lg-new-name" maxlength="80" placeholder="例：東京2027" />
+      </div>
+      <div class="field">
+        <label>帳戶與分類</label>
+        <div class="seg-mini">
+          <label><input type="radio" name="lgnew" value="blank" checked><span>用預設帳戶</span></label>
+          <label><input type="radio" name="lgnew" value="copy"><span>複製目前這本的設定</span></label>
+        </div>
+        <div class="hint" style="margin-top:6px">「複製設定」會帶入目前帳本的帳戶（餘額歸零）、消費分類與同行成員，<b>不會</b>複製任何消費明細。匯率表兩者都會沿用。</div>
+      </div>
+      <div class="row-end">
+        <button class="btn btn-ghost" onclick="toggleLedgerAdd(false)">取消</button>
+        <button class="btn btn-primary" onclick="createLedgerFromForm()">建立並切換</button>
+      </div>
+    </div>
+
+    <div class="row-end" style="margin-top:10px">
+      <button class="btn btn-sm" id="lg-add-btn" onclick="toggleLedgerAdd(true)">＋ 新增帳本</button>
+      <button class="btn btn-ghost" onclick="closeLedgerModal()">關閉</button>
+    </div>
+  </div>
+</div>
+
 <!-- 設定 Modal -->
 <div class="modal-bg" id="settings-modal">
   <div class="modal">
@@ -737,7 +783,7 @@
         <select id="s-add-cur"></select>
         <button class="btn btn-sm" onclick="addRateRow()">＋ 新增幣別匯率</button>
       </div>
-      <div class="hint">可按上方「🔄 更新最新匯率」自動帶入台灣銀行現金匯率（台銀沒有的幣別請手動輸入）。帳戶使用中的幣別會自動列出。</div>
+      <div class="hint">按上方「🔄 更新最新匯率」自動帶入<b>台灣銀行「本行賣出．現金」匯率</b>（換現金的實際成本）。台銀沒有現金報價的幣別，或想改成手機付款當下的匯率，直接在此手動輸入即可。帳戶使用中的幣別會自動列出。</div>
     </div>
 
     <div class="modal-section">
@@ -874,7 +920,8 @@
 
 <script>
 /* ===================== 資料層 ===================== */
-const STORE_KEY = 'jp_trip_ledger_v2';
+const STORE_KEY = 'jp_trip_ledger_v2';        // legacy 鏡射（單一帳本；舊版 App／舊快取仍可讀寫）
+const STORE_KEY_V3 = 'jp_trip_ledger_v3';     // 多帳本 store（真相源）
 const KEYSEP = String.fromCharCode(0); // 小項複合鍵分隔符（NUL，使用者不可能輸入；不回拆、僅當 Map 鍵）
 const FEE_CAT = '手續費';               // 手續費大項（單一真相源；類型＝其小項，於設定的「消費分類」編輯）
 const DEFAULT_FEE_TYPES = ['信用卡手續費', 'ATM提領', '跨行轉帳', '匯差', '其他'];
@@ -906,6 +953,8 @@ const CUR_META = {
   NZD: { sym: 'NZ$',  name: '紐幣',     dp: 2 },
   CAD: { sym: 'C$',   name: '加幣',     dp: 2 },
   CHF: { sym: 'CHF ', name: '瑞士法郎', dp: 2 },
+  SEK: { sym: 'SEK ', name: '瑞典克朗', dp: 2 },   // 台銀僅即期報價 → 需手動輸入
+  ZAR: { sym: 'ZAR ', name: '南非幣',   dp: 2 },   // 台銀僅即期報價 → 需手動輸入
 };
 const CUR_CODES = Object.keys(CUR_META);
 // 未知代碼不炸：以代碼本身當前綴、視為整數幣別
@@ -1300,7 +1349,8 @@ function runSplitSelfTest() {
   return { pass, fail, fails };
 }
 
-let data = load();
+let store = loadStore();           // 多帳本容器
+let data = activeLedger();         // 目前這本（App 其餘邏輯只認得 data）
 let filter = 'all';
 let dateFilter = 'all';
 let sortMode = 'date_desc';
@@ -1320,12 +1370,64 @@ let groupEditIds = [];             // 進入群組編輯時載入的既有筆 id
 let _gidCountCache = null;         // gidCounts 渲染週期快取（save 時失效）
 let _batchModalApply = null;       // 批量 modal 套用 callback
 
-function load() {
+/* ===================== 多帳本 store =====================
+   結構：{ ledgers:[帳本…], activeLedgerId, _savedAt }（存 STORE_KEY_V3）
+   全域 `data` 永遠指向「目前這本」→ App 其餘 data.* 邏輯完全不用改。
+   同時把「目前這本」以舊格式寫回 STORE_KEY（legacy 鏡射），讓舊版 App／離線舊快取仍讀得懂；
+   下次載入時若鏡射與 store 內容不同，代表舊版在離線時改過 → 以鏡射為準（救回離線編輯）。 */
+function normalizeLedger(d) {
+  const l = normalizeLedgerFields(d);
+  if (!l.id || typeof l.id !== 'string') l.id = genId();
+  if (!l.createdAt) l.createdAt = today();
+  l.archived = !!l.archived;
+  return l;
+}
+function defaultStore() {
+  const first = normalizeLedger(defaultData());
+  return { ledgers: [first], activeLedgerId: first.id, _savedAt: 0 };
+}
+function readJSON(key) {
+  try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+}
+function loadStore() {
   try {
-    const raw = localStorage.getItem(STORE_KEY) || localStorage.getItem('jp_trip_ledger_v1');
-    if (!raw) return defaultData();
-    const d = JSON.parse(raw);
-    if (!d.accounts || !d.txns) return defaultData();
+    const s = readJSON(STORE_KEY_V3);
+    const legacyRaw = readJSON(STORE_KEY) || readJSON('jp_trip_ledger_v1');
+    const legacy = (legacyRaw && legacyRaw.accounts && legacyRaw.txns) ? legacyRaw : null;
+    // 尚未有多帳本 store：舊的單一帳本包成第一本（沒有舊資料就用預設）
+    if (!s || !Array.isArray(s.ledgers) || !s.ledgers.length) {
+      const first = normalizeLedger(legacy || defaultData());
+      return { ledgers: [first], activeLedgerId: first.id, _savedAt: Number(s && s._savedAt) || 0 };
+    }
+    const store = {
+      ledgers: s.ledgers.map(normalizeLedger),
+      activeLedgerId: s.activeLedgerId,
+      _savedAt: Number(s._savedAt) || 0
+    };
+    // 離線舊版救援：鏡射有 id 且內容與 store 內同一本不同 → 鏡射較新（本 App 每次 save 都寫成一致）
+    if (legacy && typeof legacy.id === 'string') {
+      const i = store.ledgers.findIndex(l => l.id === legacy.id);
+      if (i >= 0) {
+        const mirrored = normalizeLedger(legacy);
+        if (JSON.stringify(mirrored) !== JSON.stringify(store.ledgers[i])) {
+          store.ledgers[i] = mirrored;
+          store.activeLedgerId = mirrored.id;
+        }
+      }
+    }
+    if (!store.ledgers.some(l => l.id === store.activeLedgerId)) store.activeLedgerId = store.ledgers[0].id;
+    return store;
+  } catch (e) {
+    console.error('讀取失敗，使用預設值', e);
+    return defaultStore();
+  }
+}
+function activeLedger() { return store.ledgers.find(l => l.id === store.activeLedgerId) || store.ledgers[0]; }
+
+// 單一帳本欄位正規化（原 load() 的內容；冪等，import 與 load 共用）
+function normalizeLedgerFields(d) {
+  try {
+    if (!d || typeof d !== 'object' || !d.accounts || !d.txns) return defaultData();
     const def = defaultData();
     if (!d.categories) d.categories = def.categories;
     if (!d.categories[FEE_CAT] || !Array.isArray(d.categories[FEE_CAT]) || !d.categories[FEE_CAT].length)
@@ -1348,8 +1450,14 @@ function load() {
 function save() {
   _gidCountCache = null;           // 資料變更 → 拆分組計數快取失效
   if (data.rates && Number(data.rates.JPY) > 0) data.rate = Number(data.rates.JPY); // legacy 鏡射：舊版 App 仍讀得懂
+  store.activeLedgerId = data.id;
+  store._savedAt = Date.now();
+  data._savedAt = store._savedAt;
+  try { localStorage.setItem(STORE_KEY_V3, JSON.stringify(store)); }
+  catch (e) { toast('儲存失敗，可能空間不足：' + e.message); return; }
+  // legacy 鏡射（目前這本，舊格式）；寫失敗就清掉，避免殘留舊內容在下次載入被誤判為「較新」
   try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
-  catch (e) { toast('儲存失敗，可能空間不足：' + e.message); }
+  catch (e) { try { localStorage.removeItem(STORE_KEY); } catch (e2) {} }
 }
 // 單一 gid 的全帳本筆數（lazy 快取；角標判定用）
 function gidCountOf(gid) {
@@ -1894,7 +2002,7 @@ function render() {
 
 function renderTitle() {
   const name = (data.ledgerName || '旅行記帳').trim() || '旅行記帳';
-  const el = document.getElementById('app-title');
+  const el = document.getElementById('app-title-text');
   if (el) el.textContent = '✈️ ' + name;
   document.title = name.replace(/[\r\n]+/g, ' ');
 }
@@ -3042,52 +3150,210 @@ function rateSane(newRate, oldRate) {
   const ratio = newRate / o;
   return ratio >= 0.5 && ratio <= 1.5;
 }
+// 台銀 CSV 取得路徑（依序嘗試；台銀本站擋非瀏覽器請求，需經可回 CORS 標頭的代理）
+// 實測 2026-07-19：r.jina.ai 可用（ACAO 回應來源網域）；allorigins 目前被擋（520），保留待其恢復
+const BOT_CSV_URL = 'https://rate.bot.com.tw/xrt/flcsv/0/day';
+const BOT_ROUTES = [
+  { name: 'r.jina.ai', ms: 12000, url: u => 'https://r.jina.ai/' + u },
+  { name: 'allorigins', ms: 8000, url: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
+];
 async function updateRate() {
   const btn = document.getElementById('rate-btn');
   btn.disabled = true; const old = btn.textContent; btn.textContent = '更新中…';
   const wanted = ratedCurs();                                 // 只更新目前追蹤的外幣
   if (!wanted.length) { btn.disabled = false; btn.textContent = old; toast('目前沒有外幣帳戶，不需要匯率'); return; }
-  const got = {}, srcs = [], skipped = [];
-  const take = (cur, perTWD, label) => {                      // perTWD＝1 台幣 = ? 該幣
-    const v = normRate(perTWD);
-    if (!rateSane(v, data.rates ? data.rates[cur] : null)) { skipped.push(curName(cur)); return; }
-    got[cur] = v; if (srcs.indexOf(label) < 0) srcs.push(label);
-  };
+  const got = {}, skipped = [];
   try {
-    // 主來源：台灣銀行現金賣出（透過 CORS proxy；一次取全幣別）
-    try {
-      const proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://rate.bot.com.tw/xrt/flcsv/0/day');
-      const res = await fetchWithTimeout(proxied, 9000);
-      const map = parseBotCsv(await res.text());              // { USD: 31.4, JPY: 0.2008, ... }（台幣/該幣）
-      for (const c of wanted) if (map[c] > 0) take(c, 1 / map[c], '台銀現金賣出');
-    } catch (e1) { /* 台銀不可用 → 落到備援 */ }
-    // 備援：參考中價（回傳即為「1 台幣 = ? 該幣」，與本 App 慣例同向）
-    const missing = wanted.filter(c => !(got[c] > 0) && skipped.indexOf(curName(c)) < 0);
-    if (missing.length) {
+    // 唯一自動來源：台灣銀行「本行賣出．現金」匯率（出國換現金的實際成本）
+    let map = null;
+    for (const route of BOT_ROUTES) {
       try {
-        const res2 = await fetchWithTimeout('https://open.er-api.com/v6/latest/TWD', 10000);
-        const j = await res2.json();
-        const r = (j && j.rates) || {};
-        for (const c of missing) if (Number(r[c]) > 0) take(c, Number(r[c]), '參考中價');
-      } catch (e2) { /* 備援也失敗 */ }
+        const res = await fetchWithTimeout(route.url(BOT_CSV_URL), route.ms);
+        const m = parseBotCsv(await res.text());               // { USD: 32.56, JPY: 0.2025, ... }（台幣/該幣）
+        if (Object.keys(m).length) { map = m; break; }
+      } catch (e) { /* 換下一條路徑 */ }
+    }
+    if (map) {
+      for (const c of wanted) {
+        if (!(map[c] > 0)) continue;                           // 台銀無現金報價（如 ZAR/SEK/MOP）→ 留給手動
+        const v = normRate(1 / map[c]);                        // 轉成「1 台幣 = ? 該幣」
+        if (!rateSane(v, data.rates ? data.rates[c] : null)) { skipped.push(curName(c)); continue; }
+        got[c] = v;
+      }
     }
     const okCurs = Object.keys(got);
     if (!okCurs.length) {
-      toast('匯率更新失敗，可到「⚙️ 設定」手動輸入匯率' + (skipped.length ? `（${skipped.join('、')} 取得值異常已略過）` : ''));
+      toast(map ? '台銀沒有這些幣別的現金匯率，請到「⚙️ 設定」手動輸入'
+                : '匯率更新失敗（台銀暫時連不上），可到「⚙️ 設定」手動輸入匯率'
+        + (skipped.length ? `（${skipped.join('、')} 取得值異常已略過）` : ''));
       return;
     }
     data.rates = Object.assign({}, data.rates, got);
-    data.rateSource = srcs.join('＋') + (srcs.indexOf('參考中價') >= 0 ? '（非現金匯率）' : '');
+    data.rateSource = '台銀現金賣出';
     data.rateUpdatedAt = nowStr();
     save(); render();
     if (document.getElementById('settings-modal').classList.contains('show')) renderRateEditor();
     const miss = wanted.filter(c => okCurs.indexOf(c) < 0);
-    toast('匯率已更新：' + okCurs.map(c => `${curName(c)} ${curSym(c)}${data.rates[c]}`).join('、') +
-      (miss.length ? `\n（${miss.map(curName).join('、')} 查不到，請手動輸入）` : ''));
+    toast('匯率已更新（台銀現金賣出）：' + okCurs.map(c => `${curName(c)} ${curSym(c)}${data.rates[c]}`).join('、') +
+      (miss.length ? `\n（${miss.map(curName).join('、')} 台銀無現金報價，請手動輸入）` : ''));
   } finally {
     btn.disabled = false; btn.textContent = old;
   }
 }
+
+/* ===================== 帳本（多帳本切換／管理）===================== */
+let _lgPendingDel = null;          // 待確認刪除的帳本 id（inline 兩段式確認，不用原生 confirm）
+
+function openLedgerModal() {
+  _lgPendingDel = null;
+  renderLedgerModal(); toggleLedgerAdd(false);
+  document.getElementById('ledger-modal').classList.add('show');
+}
+function closeLedgerModal() {
+  _lgPendingDel = null;
+  document.getElementById('ledger-modal').classList.remove('show');
+}
+// 帳本摘要（筆數／日期範圍／使用幣別）
+function ledgerStat(l) {
+  const exp = (l.txns || []).filter(t => t.type === 'expense');
+  let dmin = null, dmax = null;
+  for (const t of exp) {
+    if (!t.date) continue;
+    if (dmin === null || t.date < dmin) dmin = t.date;
+    if (dmax === null || t.date > dmax) dmax = t.date;
+  }
+  const curs = [];
+  for (const a of (l.accounts || [])) if (a.currency && curs.indexOf(a.currency) < 0) curs.push(a.currency);
+  return { count: exp.length, range: dmin ? (dmin === dmax ? dmin : dmin + ' ~ ' + dmax) : '尚無消費', curs: curs.join('／') };
+}
+function ledgerRowHTML(l) {
+  const isCur = l.id === data.id;
+  const st = ledgerStat(l);
+  const ops = (_lgPendingDel === l.id)
+    ? `<span class="lg-cur" style="color:var(--red)">確定刪除？</span>` +
+      `<button class="btn btn-sm btn-danger" onclick="confirmDeleteLedger('${l.id}')">確定刪除</button>` +
+      `<button class="btn btn-sm" onclick="cancelDeleteLedger()">取消</button>`
+    : `<button class="btn btn-sm" title="${l.archived ? '取消封存' : '封存（收到清單下方，資料不動）'}" onclick="toggleLedgerArchive('${l.id}')">${l.archived ? '↩ 取消封存' : '🗄 封存'}</button>` +
+      `<button class="btn btn-sm btn-danger" title="刪除此帳本" aria-label="刪除此帳本" onclick="askDeleteLedger('${l.id}')">🗑</button>`;
+  return `<div class="ledger-row${isCur ? ' active' : ''}">` +
+    `<input type="text" class="lg-name" maxlength="80" value="${escapeHtml(l.ledgerName || '未命名帳本')}" aria-label="帳本名稱" onchange="renameLedger('${l.id}', this.value)" />` +
+    (isCur ? `<span class="lg-cur">● 使用中</span>` : `<button class="btn btn-sm btn-primary" onclick="switchLedger('${l.id}')">切換</button>`) +
+    `<div class="lg-ops">${ops}</div>` +
+    `<div class="lg-meta">${st.count} 筆消費　·　${escapeHtml(st.range)}${st.curs ? '　·　' + escapeHtml(st.curs) : ''}</div>` +
+  `</div>`;
+}
+function renderLedgerModal() {
+  const el = document.getElementById('ledger-list');
+  if (!el) return;
+  const live = store.ledgers.filter(l => !l.archived);
+  const arch = store.ledgers.filter(l => l.archived);
+  el.innerHTML = live.map(ledgerRowHTML).join('') +
+    (arch.length ? `<div class="ledger-arch-head">🗄 已封存（${arch.length}）</div>` + arch.map(ledgerRowHTML).join('') : '');
+}
+function toggleLedgerAdd(show) {
+  const box = document.getElementById('ledger-add');
+  const btn = document.getElementById('lg-add-btn');
+  if (!box) return;
+  box.style.display = show ? '' : 'none';
+  if (btn) btn.style.display = show ? 'none' : '';
+  if (show) {
+    document.getElementById('lg-new-name').value = '';
+    const blank = document.querySelector('input[name="lgnew"][value="blank"]');
+    if (blank) blank.checked = true;
+    document.getElementById('lg-new-name').focus();
+  }
+}
+function renameLedger(id, name) {
+  const l = store.ledgers.find(x => x.id === id);
+  if (!l) return;
+  l.ledgerName = (name || '').trim().slice(0, 80) || '未命名帳本';
+  save(); renderTitle(); renderLedgerModal();
+}
+// 換帳本＝換資料集：暫態一律清空（沿用匯入/還原的同一條紀律）
+function resetTransientState() {
+  filter = 'all'; dateFilter = 'all'; sortMode = 'date_desc'; chartMode = 'cat';
+  editingId = null; editingGid = null; groupEditIds = []; toamtTouched = false;
+  entryMode = 'single'; multiRows = []; splitRows = [];
+  analysisFilter = { weekdays: [], dates: [] };
+  splitTax = { mode: 'none', rate: 8 }; singleTax = { mode: 'none', rate: 8 };
+  settleCur = HOME_CUR; splitEditingId = null; _drillCtx = null; _gidCountCache = null;
+  _summaryExpandedCats.clear(); _summaryExpandedPays.clear();
+  clearSplitUndo();      // 換資料集前清分帳 undo 緩衝，杜絕跨帳本注入
+  exitSelectMode();      // 清 selectedIds / 退出選取模式
+}
+function switchLedger(id, quiet) {
+  const l = store.ledgers.find(x => x.id === id);
+  if (!l) return;
+  if (data && l.id === data.id) { if (!quiet) closeLedgerModal(); return; }
+  save();                       // 先把目前這本存起來
+  store.activeLedgerId = id;
+  data = l;
+  resetTransientState();
+  save();
+  refreshSelects(); render(); renderLedgerModal();
+  if (!quiet) { closeLedgerModal(); toast(`已切換到「${l.ledgerName}」`); }
+}
+function createLedgerFromForm() {
+  const nameEl = document.getElementById('lg-new-name');
+  const mode = (document.querySelector('input[name="lgnew"]:checked') || {}).value || 'blank';
+  const name = ((nameEl && nameEl.value) || '').trim().slice(0, 80) || '新帳本';
+  const l = normalizeLedger(defaultData());
+  l.id = genId(); l.createdAt = today(); l.ledgerName = name;
+  l.rates = Object.assign({}, data.rates);      // 匯率表沿用（同時期匯率相近，之後可各自更新）
+  l.rate = data.rate; l.rateSource = data.rateSource; l.rateUpdatedAt = data.rateUpdatedAt;
+  if (mode === 'copy') {
+    l.accounts = JSON.parse(JSON.stringify(data.accounts || [])).map(a => Object.assign({}, a, { initial: 0 }));
+    l.categories = JSON.parse(JSON.stringify(data.categories || {}));
+    l.members = JSON.parse(JSON.stringify(data.members || []));
+  }
+  store.ledgers.push(l);
+  switchLedger(l.id, true);
+  toggleLedgerAdd(false);
+  renderLedgerModal();
+  toast(`已建立並切換到「${name}」`);
+}
+function toggleLedgerArchive(id) {
+  const l = store.ledgers.find(x => x.id === id);
+  if (!l) return;
+  if (!l.archived) {
+    const others = store.ledgers.filter(x => x.id !== id && !x.archived);
+    if (!others.length) { toast('至少要保留一本未封存的帳本'); return; }
+    l.archived = true;
+    if (l.id === data.id) switchLedger(others[0].id, true);   // 封存目前這本 → 自動切到另一本
+    else save();
+  } else {
+    l.archived = false; save();
+  }
+  renderLedgerModal();
+  toast(`「${l.ledgerName}」${l.archived ? '已封存' : '已取消封存'}`);
+}
+function askDeleteLedger(id) {
+  if (store.ledgers.length <= 1) { toast('這是唯一的帳本，無法刪除'); return; }
+  _lgPendingDel = id; renderLedgerModal();
+}
+function cancelDeleteLedger() { _lgPendingDel = null; renderLedgerModal(); }
+function confirmDeleteLedger(id) {
+  const i = store.ledgers.findIndex(x => x.id === id);
+  if (i < 0 || store.ledgers.length <= 1) { _lgPendingDel = null; renderLedgerModal(); return; }
+  const name = store.ledgers[i].ledgerName;
+  const wasCurrent = store.ledgers[i].id === data.id;
+  try { localStorage.setItem('jp_trip_ledger_deleted_bak', JSON.stringify(store.ledgers[i])); } catch (e) {}  // 誤刪救援：留最後一本
+  store.ledgers.splice(i, 1);
+  _lgPendingDel = null;
+  if (wasCurrent) {
+    const next = store.ledgers.find(l => !l.archived) || store.ledgers[0];
+    store.activeLedgerId = next.id;
+    data = next;
+    resetTransientState();
+    refreshSelects();
+  }
+  save(); render(); renderLedgerModal();
+  toast(`已刪除帳本「${name}」`);
+}
+
+/* 帳本 modal：點背景 / Esc 關閉 */
+document.getElementById('ledger-modal').addEventListener('click', e => { if (e.target.id === 'ledger-modal') closeLedgerModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('ledger-modal').classList.contains('show')) closeLedgerModal(); });
 
 /* ===================== 設定 ===================== */
 function openSettings() {
@@ -3313,6 +3579,19 @@ function sanitizeImport(d) {
   d.schemaVersion = 2;
   return d;
 }
+// 用一份新資料取代「目前這本」（維持同一個帳本 id，確保 store 內的參照同步替換）
+function replaceActiveLedger(nl) {
+  const kept = data.id;
+  const out = normalizeLedger(nl);
+  out.id = kept;
+  out.createdAt = data.createdAt || out.createdAt;
+  out.archived = !!data.archived;
+  const i = store.ledgers.findIndex(l => l.id === kept);
+  if (i >= 0) store.ledgers[i] = out; else store.ledgers.push(out);
+  store.activeLedgerId = out.id;
+  data = out;
+  return out;
+}
 function importJSON(e) {
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
@@ -3322,15 +3601,34 @@ function importJSON(e) {
       if (!d.accounts || !d.txns) throw new Error('檔案格式不正確');
       const incoming = (typeof d.ledgerName === 'string' && d.ledgerName.trim()) ? d.ledgerName.trim() : '（未命名帳本）';
       const current = data.ledgerName || '旅行記帳';
-      if (!confirm(`匯入會覆蓋目前所有資料。\n\n目前：「${current}」\n匯入：「${incoming}」\n\n系統會先自動備份目前資料（僅保留最近一次，可在設定中還原）。\n確定匯入？`)) return;
-      try { localStorage.setItem('jp_trip_ledger_v2_autobak', JSON.stringify(data)); }
-      catch (err) { if (!confirm('⚠️ 自動備份目前資料失敗（可能空間不足）。\n繼續匯入將無法自動還原舊資料，建議先手動「匯出備份」。\n仍要繼續匯入嗎？')) return; }
-      data = sanitizeImport(d);
-      if (!data.categories) data.categories = defaultData().categories;
-      clearSplitUndo(); // N1-a：換資料集前清分帳 undo 緩衝，杜絕舊 split 注入新帳本
-      exitSelectMode(); // 換資料集前退出選取模式，清過期 selectedIds
-      save(); refreshSelects(); render(); closeSettings();
-      toast('匯入成功 ✅（如需復原請到 設定 → 還原上次自動備份）');
+      const cnt = (d.txns || []).filter(t => t && t.type === 'expense').length;
+      // 多帳本：預設「新增成一本」（不動現有資料）；要覆蓋目前這本才需要自動備份
+      const body =
+        `<div class="hint" style="margin-bottom:8px">檔案：<b>${escapeHtml(incoming)}</b>（${cnt} 筆消費）</div>` +
+        `<div class="field"><label>要匯入成？</label><div class="seg-mini">` +
+        `<label><input type="radio" name="impmode" value="new" checked><span>新增成一本新帳本</span></label>` +
+        `<label><input type="radio" name="impmode" value="over"><span>覆蓋目前這本</span></label>` +
+        `</div><div class="hint" style="margin-top:6px">「新增成一本」不會動到現有帳本；「覆蓋目前這本（${escapeHtml(current)}）」會先自動備份，可在設定中還原。</div></div>`;
+      openBatchModal('匯入資料', body, () => {
+        const mode = (document.querySelector('input[name="impmode"]:checked') || {}).value || 'new';
+        if (mode === 'new') {
+          const nl = normalizeLedger(sanitizeImport(d));
+          nl.id = genId(); nl.createdAt = today(); nl.archived = false;
+          store.ledgers.push(nl);
+          switchLedger(nl.id, true);
+          save(); refreshSelects(); render(); closeSettings();
+          toast(`已匯入成新帳本「${nl.ledgerName}」✅`);
+          return;
+        }
+        try { localStorage.setItem('jp_trip_ledger_v2_autobak', JSON.stringify(data)); }
+        catch (err) { toast('⚠️ 自動備份失敗（可能空間不足），已取消覆蓋。建議先手動「匯出備份」。'); return false; }
+        replaceActiveLedger(sanitizeImport(d));
+        if (!data.categories) data.categories = defaultData().categories;
+        clearSplitUndo(); // N1-a：換資料集前清分帳 undo 緩衝，杜絕舊 split 注入新帳本
+        exitSelectMode(); // 換資料集前退出選取模式，清過期 selectedIds
+        save(); refreshSelects(); render(); closeSettings();
+        toast('匯入成功 ✅（如需復原請到 設定 → 還原上次自動備份）');
+      }, '匯入');
     } catch (err) { toast('匯入失敗：' + err.message); }
   };
   reader.readAsText(file); e.target.value = '';
@@ -3344,7 +3642,7 @@ function restoreAutobak() {
   if (!d || !d.accounts || !d.txns) { toast('自動備份內容不完整，無法還原'); return; }
   if (!confirm('還原會用「上次匯入前的自動備份」覆蓋目前資料。\n（目前資料會被存成新的自動備份，可再按一次還原切回。）\n確定還原？')) return;
   const cur = JSON.stringify(data); // 還原前先留存目前資料，讓還原可逆
-  data = sanitizeImport(d);
+  replaceActiveLedger(sanitizeImport(d));
   clearSplitUndo(); // N1-a：還原前清分帳 undo 緩衝
   exitSelectMode(); // 換資料集前退出選取模式，清過期 selectedIds
   if (!data.categories) data.categories = defaultData().categories;
@@ -3369,9 +3667,11 @@ function exportCSV() {
   download(`旅行記帳_${today()}.csv`, csv, 'text/csv');
 }
 function clearAll() {
-  if (!confirm('⚠️ 這會清除所有記錄與設定，回到初始狀態。建議先匯出備份。確定清除？')) return;
-  if (!confirm('再次確認：真的要清除全部嗎？')) return;
-  data = defaultData(); clearSplitUndo(); exitSelectMode(); save(); refreshSelects(); render(); closeSettings();
+  const nm = data.ledgerName || '這本';
+  if (!confirm(`⚠️ 這會清除「${nm}」的所有記錄與設定，回到初始狀態（其他帳本不受影響）。建議先匯出備份。確定清除？`)) return;
+  if (!confirm('再次確認：真的要清除這本帳本的全部內容嗎？')) return;
+  replaceActiveLedger(defaultData());
+  resetTransientState(); save(); refreshSelects(); render(); closeSettings();
 }
 
 /* ===================== 工具 ===================== */
@@ -4792,6 +5092,29 @@ function runCurrencySelfTest() {
   ok(rateSane(50, 4.98) === false && rateSane(0.5, 4.98) === false, 'rateSane：偏離逾 50% 擋下');
   ok(rateSane(0.0318, 1) === true, 'rateSane：現值為 1（新增幣別佔位）不設限');
   ok(rateSane(0.0318, null) === true && rateSane(0, 4.98) === false, 'rateSane：無現值放行、非正值擋下');
+
+  // ⑥ 多帳本：帳本正規化與摘要（純函式）
+  const L = normalizeLedger({
+    ledgerName: '測試本', rate: 4.98,
+    accounts: [{ id: 'a', name: 'A', currency: 'JPY', kind: 'prepaid', initial: 0 },
+               { id: 'b', name: 'B', currency: 'USD', kind: 'prepaid', initial: 0 }],
+    txns: [{ id: 't1', type: 'expense', date: '2026-07-03', account: 'a', amount: 100 },
+           { id: 't2', type: 'expense', date: '2026-07-01', account: 'b', amount: 20 },
+           { id: 't3', type: 'topup', date: '2026-07-02', from: 'a', to: 'b', amount: 5 }],
+    categories: { '飲食': ['晚餐'] }
+  });
+  ok(/^[a-z0-9]+$/i.test(L.id) && !!L.createdAt && L.archived === false, 'normalizeLedger：自動補 id/createdAt/archived');
+  ok(L.rates.JPY === 4.98, 'normalizeLedger：沿用多幣別遷移');
+  const L2 = normalizeLedger(L);
+  ok(L2.id === L.id && L2.createdAt === L.createdAt, 'normalizeLedger：冪等（既有 id/createdAt 不被換掉）');
+  const st = ledgerStat(L);
+  ok(st.count === 2, 'ledgerStat：只算消費筆數（轉帳不計）');
+  ok(st.range === '2026-07-01 ~ 2026-07-03', 'ledgerStat：日期範圍取最早～最晚');
+  ok(st.curs === 'JPY／USD', 'ledgerStat：列出使用中的幣別');
+  const empty = ledgerStat(normalizeLedger(defaultData()));
+  ok(empty.count === 0 && empty.range === '尚無消費', 'ledgerStat：空帳本不炸');
+  const single = ledgerStat({ txns: [{ type: 'expense', date: '2026-07-09' }], accounts: [] });
+  ok(single.range === '2026-07-09', 'ledgerStat：單日不重複顯示');
 
   return { pass, fail, fails };
 }
