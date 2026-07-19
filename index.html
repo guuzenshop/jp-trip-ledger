@@ -320,6 +320,15 @@
   .settle-net .pos { color:var(--green); font-weight:600; } .settle-net .neg { color:var(--red); font-weight:600; }
   .settle-note { font-size:11px; color:var(--muted); margin-top:8px; }
   .split-empty { text-align:center; color:var(--muted); padding:18px; font-size:13px; }
+  .settle-cur-sel { width:auto; padding:6px 9px; font-size:13px; border-radius:8px; }
+  /* 設定：多幣別匯率編輯列 */
+  .rate-edit { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:7px 0; border-bottom:1px dashed var(--line); }
+  .rate-edit:last-child { border-bottom:0; }
+  .rate-edit .rate-cur { min-width:92px; font-size:13px; }
+  .rate-edit .rate-eq { font-size:12px; color:var(--muted); }
+  .rate-edit input { width:104px; padding:7px 8px; font-size:13px; }
+  .rate-add { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+  .rate-add select { width:auto; padding:7px 9px; font-size:13px; }
   .seg-mini { display:inline-flex; background:var(--panel2); border-radius:9px; padding:3px; gap:3px; flex-wrap:wrap; }
   .seg-mini label { padding:6px 13px; border-radius:7px; cursor:pointer; font-size:13px; color:var(--muted); user-select:none; }
   .seg-mini input { display:none; }
@@ -690,10 +699,7 @@
       <div id="split-list"></div>
       <div class="settle-head">
         <span class="split-sub" style="margin:0">💡 結算（精簡轉帳）</span>
-        <div class="seg-mini" id="settle-cur">
-          <label><input type="radio" name="settlecur" value="TWD" checked onchange="setSettleCur('TWD')"><span>台幣</span></label>
-          <label><input type="radio" name="settlecur" value="JPY" onchange="setSettleCur('JPY')"><span>日幣</span></label>
-        </div>
+        <select class="settle-cur-sel" id="settle-cur" onchange="setSettleCur(this.value)" title="結算顯示幣別"><!-- 動態產生 --></select>
       </div>
       <div id="settle-box"></div>
     </div>
@@ -725,9 +731,13 @@
     </div>
 
     <div class="field" id="s-rate-field">
-      <label>匯率（1 元台幣 = ? 日圓）</label>
-      <input type="number" id="s-rate" inputmode="decimal" step="0.0001" />
-      <div class="hint">可按上方「🔄 更新最新匯率」自動帶入台灣銀行現金匯率，或在此手動修改。</div>
+      <label>匯率（每種外幣對台幣；兩欄互相連動）</label>
+      <div id="rate-editor"></div>
+      <div class="rate-add">
+        <select id="s-add-cur"></select>
+        <button class="btn btn-sm" onclick="addRateRow()">＋ 新增幣別匯率</button>
+      </div>
+      <div class="hint">可按上方「🔄 更新最新匯率」自動帶入台灣銀行現金匯率（台銀沒有的幣別請手動輸入）。帳戶使用中的幣別會自動列出。</div>
     </div>
 
     <div class="modal-section">
@@ -810,10 +820,7 @@
       </div>
       <div class="field">
         <label>幣別</label>
-        <select id="sp-currency" onchange="renderSplitParts()">
-          <option value="JPY">日圓 ¥</option>
-          <option value="TWD">台幣 NT$</option>
-        </select>
+        <select id="sp-currency" onchange="renderSplitParts()"><!-- 選項由 refreshSplitCurSelect() 依使用中幣別動態產生 --></select>
       </div>
       <div class="field">
         <label>日期</label>
@@ -874,10 +881,71 @@ const DEFAULT_FEE_TYPES = ['信用卡手續費', 'ATM提領', '跨行轉帳', '�
 const TAX_CAT = '稅費';                  // 消費稅大項（外加稅時自動生成稅費筆；小項＝消費稅8%/10%）
 const DEFAULT_TAX_TYPES = ['消費稅8%', '消費稅10%'];
 
+/* ===================== 幣別（多幣別核心；純函式，?test=1 自測）=====================
+   慣例（單一真相源）：rates[cur] =「1 台幣 ＝ X 該幣」，與舊版單一 data.rate 同方向
+   → 舊資料遷移只是搬值（rates.JPY = rate），既有日幣算式一個浮點位都不變。
+   台幣＝本國基準，恆為 1，不存進 rates。                                            */
+const HOME_CUR = 'TWD';
+const CUR_META = {
+  TWD: { sym: 'NT$',  name: '台幣',     dp: 0 },
+  JPY: { sym: '¥',    name: '日圓',     dp: 0 },
+  USD: { sym: '$',    name: '美金',     dp: 2 },
+  EUR: { sym: '€',    name: '歐元',     dp: 2 },
+  KRW: { sym: '₩',    name: '韓元',     dp: 0 },
+  GBP: { sym: '£',    name: '英鎊',     dp: 2 },
+  HKD: { sym: 'HK$',  name: '港幣',     dp: 2 },
+  CNY: { sym: 'CN¥',  name: '人民幣',   dp: 2 },
+  MOP: { sym: 'MOP$', name: '澳門幣',   dp: 2 },
+  THB: { sym: '฿',    name: '泰銖',     dp: 2 },
+  SGD: { sym: 'S$',   name: '新加坡幣', dp: 2 },
+  MYR: { sym: 'RM',   name: '馬幣',     dp: 2 },
+  VND: { sym: '₫',    name: '越南盾',   dp: 0 },
+  PHP: { sym: '₱',    name: '披索',     dp: 2 },
+  IDR: { sym: 'Rp',   name: '印尼盾',   dp: 0 },
+  AUD: { sym: 'A$',   name: '澳幣',     dp: 2 },
+  NZD: { sym: 'NZ$',  name: '紐幣',     dp: 2 },
+  CAD: { sym: 'C$',   name: '加幣',     dp: 2 },
+  CHF: { sym: 'CHF ', name: '瑞士法郎', dp: 2 },
+};
+const CUR_CODES = Object.keys(CUR_META);
+// 未知代碼不炸：以代碼本身當前綴、視為整數幣別
+function curMeta(cur) { return CUR_META[cur] || { sym: (cur || '?') + ' ', name: cur || '', dp: 0 }; }
+function curSym(cur) { return curMeta(cur).sym; }
+function curName(cur) { const m = CUR_META[cur]; return m ? m.name : (cur || ''); }
+function isValidCur(c) { return typeof c === 'string' && Object.prototype.hasOwnProperty.call(CUR_META, c); }
+
+// 從匯率表取「1 台幣 = X 該幣」（純函式版；台幣恆 1、缺值/壞值回 1＝視同等值，不炸）
+function rateAt(rates, cur) {
+  if (cur === HOME_CUR) return 1;
+  const r = Number(rates && rates[cur]);
+  return (Number.isFinite(r) && r > 0) ? r : 1;
+}
+// 匯率表遷移（純函式，冪等）：舊格式單一 rate → rates；壞值剝除；台幣鍵不留
+function migrateRates(d) {
+  const DEF_JPY = 4.98;
+  const src = (d && d.rates && typeof d.rates === 'object') ? d.rates : null;
+  const out = {};
+  if (src) {
+    for (const k of Object.keys(src)) {
+      if (k === HOME_CUR || !isValidCur(k)) continue;      // 台幣不存、未知代碼剝除
+      const v = Number(src[k]);
+      if (Number.isFinite(v) && v > 0) out[k] = v;
+    }
+  }
+  if (!Object.keys(out).length) {                          // 無 rates → 由舊單一 rate 生（其語意恆為日圓）
+    const legacy = Number(d && d.rate);
+    out.JPY = (Number.isFinite(legacy) && legacy > 0) ? legacy : DEF_JPY;
+  }
+  d.rates = out;
+  d.rate = (out.JPY > 0) ? out.JPY : (Number(d && d.rate) > 0 ? Number(d.rate) : DEF_JPY);  // legacy 鏡射
+  return d;
+}
+
 function defaultData() {
   return {
     ledgerName: '旅行記帳',
-    rate: 4.98,
+    rate: 4.98,                       // legacy 鏡射（＝rates.JPY；保留讓舊版 App 仍讀得懂匯出檔）
+    rates: { JPY: 4.98 },             // 1 台幣 = X 該幣（台幣不列）
     rateSource: '預設值（尚未更新）',
     rateUpdatedAt: null,
     accounts: [
@@ -904,15 +972,19 @@ function defaultData() {
 }
 
 /* ===================== 分帳核心（純函式；?test=1 終端/瀏覽器自測）===================== */
-const SPLIT_CUR = ['JPY', 'TWD'];
-
-// 該筆換算台幣（用「該筆自己的 rate」，區分幣別；不呼叫使用全域 rate 的 toTWD）
-function splitToCur(x, split, targetCur) {
+// 該筆換算到目標幣別（多幣別）：
+//   ① 原幣 → 台幣：用「該筆自己的 rate」快照（1 台幣 = r 該筆幣別），反映建立當下匯率
+//   ② 台幣 → 顯示幣別：用「目前匯率表」回估（結算域＝顯示幣別，與畫面註記一致）
+//   rates 省略時取全域 data.rates（測試可傳入固定表保持純函式）
+function splitToCur(x, split, targetCur, rates) {
   if (split.currency === targetCur) return x;
-  const r = Number(split.rate) || 1; // rate：1 台幣 = r 日圓
-  return targetCur === 'TWD' ? x / r : x * r;
+  const r = Number(split.rate) || 1;
+  const twd = split.currency === HOME_CUR ? x : x / r;
+  if (targetCur === HOME_CUR) return twd;
+  const table = (rates !== undefined) ? rates : ((typeof data !== 'undefined' && data) ? data.rates : null);
+  return twd * rateAt(table, targetCur);
 }
-function splitToTWD(x, split) { return splitToCur(x, split, 'TWD'); }
+function splitToTWD(x, split) { return splitToCur(x, split, HOME_CUR); }
 // 安全物件（null-proto；只用 Object.keys / in，不呼叫原型方法）
 function cleanMap(obj, memberIds) {
   const out = Object.create(null);
@@ -972,7 +1044,7 @@ function validateSplit(split, memberIds) {
   const errs = [];
   const amount = Number(split.amount);
   if (!Number.isFinite(amount) || amount <= 0) errs.push('金額需大於 0');
-  if (!SPLIT_CUR.includes(split.currency)) errs.push('幣別不正確');
+  if (!isValidCur(split.currency)) errs.push('幣別不正確');
   if (!split.payerId || !memberIds.has(split.payerId)) errs.push('需選擇付款人');
   if (split.mode === 'equal') {
     const ps = (split.participants || []).filter(id => memberIds.has(id));
@@ -997,9 +1069,10 @@ function validateSplit(split, memberIds) {
   } else errs.push('分攤方式不正確');
   return errs;
 }
-// 結算：整數台幣域 + 單一真相源 + payer/needsReview 排除
-function computeSettlement(members, splits, targetCur) {
-  targetCur = (targetCur === 'JPY') ? 'JPY' : 'TWD'; // 結算域＝顯示幣別，避免幣別往返取整誤差
+// 結算：整數「顯示幣別」域 + 單一真相源 + payer/needsReview 排除
+// rates 省略時 splitToCur 取全域匯率表（測試可傳固定表）
+function computeSettlement(members, splits, targetCur, rates) {
+  targetCur = isValidCur(targetCur) ? targetCur : HOME_CUR; // 結算域＝顯示幣別，避免幣別往返取整誤差
   const memberIds = new Set(members.map(m => m.id));
   const paid = Object.create(null), owed = Object.create(null);
   for (const m of members) { paid[m.id] = 0; owed[m.id] = 0; }
@@ -1013,8 +1086,8 @@ function computeSettlement(members, splits, targetCur) {
       if (Math.round(sm) !== Math.round(Number(s.amount) || 0)) { skipped++; continue; }
     }
     const shares = splitSharesNative(s);
-    for (const id of Object.keys(shares)) { if (memberIds.has(id)) owed[id] += splitToCur(shares[id], s, targetCur); }
-    paid[s.payerId] += splitToCur(Math.round(Number(s.amount) || 0), s, targetCur);
+    for (const id of Object.keys(shares)) { if (memberIds.has(id)) owed[id] += splitToCur(shares[id], s, targetCur, rates); }
+    paid[s.payerId] += splitToCur(Math.round(Number(s.amount) || 0), s, targetCur, rates);
   }
   const netInt = Object.create(null);
   let sum = 0;
@@ -1058,17 +1131,24 @@ function normalizeSplitData(d) {
     return { id, name };
   });
   const memberIds = new Set(d.members.map(m => m.id));
-  const fallbackRate = Number(d.rate) > 0 ? Number(d.rate) : 4.98;
+  // 缺匯率時的估算值：優先取該幣別目前匯率表；日圓另有舊單一 rate 可退（其餘退 1 並標「匯率估算」）
+  const fallbackRateFor = (c) => {
+    if (c === HOME_CUR) return 1;
+    const r = Number((d.rates || {})[c]);
+    if (Number.isFinite(r) && r > 0) return r;
+    if (c === 'JPY') return Number(d.rate) > 0 ? Number(d.rate) : 4.98;
+    return 1;
+  };
   const seenS = new Set();
   d.splits = (Array.isArray(d.splits) ? d.splits : []).map(s => {
     if (!s || typeof s !== 'object') s = {};
     let id = /^[a-z0-9]+$/i.test(s.id || '') ? s.id : genId();
     while (seenS.has(id)) id = genId();
     seenS.add(id);
-    const currency = SPLIT_CUR.includes(s.currency) ? s.currency : 'JPY';
+    const currency = isValidCur(s.currency) ? s.currency : 'JPY';
     let amount = Number(s.amount); if (!Number.isFinite(amount) || amount < 0) amount = 0;
     let rate = Number(s.rate), rateUnknown = false;
-    if (!Number.isFinite(rate) || rate <= 0) { rate = fallbackRate; rateUnknown = true; }
+    if (!Number.isFinite(rate) || rate <= 0) { rate = fallbackRateFor(currency); rateUnknown = true; }
     const mode = ['equal', 'amount', 'shares'].includes(s.mode) ? s.mode : 'equal';
     const payerId = memberIds.has(s.payerId) ? s.payerId : '';
     const participants = Array.isArray(s.participants) ? s.participants.filter(id => memberIds.has(id)) : [];
@@ -1250,6 +1330,7 @@ function load() {
     if (!d.categories) d.categories = def.categories;
     if (!d.categories[FEE_CAT] || !Array.isArray(d.categories[FEE_CAT]) || !d.categories[FEE_CAT].length)
       d.categories[FEE_CAT] = (def.categories[FEE_CAT] || DEFAULT_FEE_TYPES).slice(); // 附加手續費分類（不覆蓋既有）
+    migrateRates(d);                // 多幣別遷移：舊單一 rate → rates（冪等；日幣數值原封搬移）
     if (d.rateSource === undefined) d.rateSource = '手動設定';
     if (d.rateUpdatedAt === undefined) d.rateUpdatedAt = null;
     if (typeof d.ledgerName !== 'string' || !d.ledgerName.trim()) d.ledgerName = def.ledgerName;
@@ -1266,6 +1347,7 @@ function load() {
 }
 function save() {
   _gidCountCache = null;           // 資料變更 → 拆分組計數快取失效
+  if (data.rates && Number(data.rates.JPY) > 0) data.rate = Number(data.rates.JPY); // legacy 鏡射：舊版 App 仍讀得懂
   try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
   catch (e) { toast('儲存失敗，可能空間不足：' + e.message); }
 }
@@ -1279,8 +1361,17 @@ function isGrouped(t) { return t.type === 'expense' && validGid(t.gid) && gidCou
 
 /* ===================== 計算 ===================== */
 function acctById(id) { return data.accounts.find(a => a.id === id); }
-function toTWD(amt, cur) { const r = Number(data.rate) || 1; return cur === 'TWD' ? amt : amt / r; }
-function toJPY(amt, cur) { const r = Number(data.rate) || 1; return cur === 'JPY' ? amt : amt * r; }
+// 目前帳本的「1 台幣 = X 該幣」；台幣恆 1
+function rateOf(cur) { return rateAt(data.rates, cur); }
+// 換算台幣（本國域）。算式與舊版單一匯率版本完全相同 → 既有日幣資料零漂移
+function toTWD(amt, cur) { return cur === HOME_CUR ? amt : amt / rateOf(cur); }
+// 任意幣別互換（先回台幣域再換出；同幣別直接回原值不繞路）
+function toCur(amt, from, to) {
+  if (from === to) return Number(amt) || 0;
+  const twd = from === HOME_CUR ? (Number(amt) || 0) : (Number(amt) || 0) / rateOf(from);
+  return to === HOME_CUR ? twd : twd * rateOf(to);
+}
+function toJPY(amt, cur) { return toCur(amt, cur, 'JPY'); }   // 相容保留（舊呼叫點語意＝換成日圓）
 
 // 回傳帳戶的 額度/已花費/已轉出/餘額
 function acctStats(id) {
@@ -1297,16 +1388,30 @@ function acctStats(id) {
   return { storedIn, spent, out, balance: storedIn - spent - out };
 }
 
+// 多幣別總額：各幣別分桶 → 各自換台幣 → 加總
+// 回傳 byCur（每幣原幣小計）＋ totalTWD；twd/jpy 為相容別名（既有顯示點沿用）
 function computeTotals(txns) {
   txns = txns || data.txns;
-  let twd = 0, jpy = 0;
+  const byCur = {};
   for (const t of txns) {
     if (t.type !== 'expense') continue;
     const a = acctById(t.account); if (!a) continue;
-    if (a.currency === 'TWD') twd += Number(t.amount) || 0;
-    else jpy += Number(t.amount) || 0;
+    const c = a.currency || 'JPY';
+    byCur[c] = (byCur[c] || 0) + (Number(t.amount) || 0);
   }
-  return { twd, jpy, totalTWD: twd + toTWD(jpy, 'JPY') };
+  let totalTWD = 0;
+  for (const c of Object.keys(byCur)) totalTWD += (c === HOME_CUR ? byCur[c] : toTWD(byCur[c], c));
+  return { byCur, totalTWD, twd: byCur[HOME_CUR] || 0, jpy: byCur.JPY || 0 };
+}
+// 總額明細文字（例：「日圓 ¥12,000（≒NT$2,410）　＋　台幣 NT$500」）；台幣桶不補換算
+function totalsBreakdownText(totals) {
+  const byCur = (totals && totals.byCur) || {};
+  const parts = Object.keys(byCur)
+    .filter(c => c !== HOME_CUR)
+    .sort((a, b) => toTWD(byCur[b], b) - toTWD(byCur[a], a))     // 台幣值大→小
+    .map(c => `${curName(c)} ${fmt(byCur[c], c)}（≒${fmt(toTWD(byCur[c], c), HOME_CUR)}）`);
+  if (byCur[HOME_CUR]) parts.push(`台幣 ${fmt(byCur[HOME_CUR], HOME_CUR)}`);
+  return parts.join('　＋　');
 }
 
 /* ===================== 手續費 / 批量 純函式（?test=1 自測；不依賴 DOM）===================== */
@@ -1331,13 +1436,13 @@ function swapTopupDirection(t) {
   const newToAmount = Number(t.amount) || 0;
   return { from: t.to, to: t.from, amount: newAmount, toAmount: newToAmount };
 }
-// 批量改帳戶的金額換算：mode='keep' 保持原數字；'convert' 依匯率把舊幣別換到新幣別
-function convertAmountOnAccountChange(amount, oldCur, newCur, rate, mode) {
+// 批量改帳戶的金額換算：mode='keep' 保持原數字；'convert' 依匯率表把舊幣別換到新幣別
+// rates＝匯率表（1 台幣 = X 該幣）；任意幣別皆可（先回台幣域再換出）
+function convertAmountOnAccountChange(amount, oldCur, newCur, rates, mode) {
   const a = Number(amount) || 0;
   if (mode !== 'convert' || oldCur === newCur) return a;
-  const r = Number(rate) || 1;                 // 1 台幣 = r 日圓
-  const twd = oldCur === 'TWD' ? a : a / r;     // 先換成台幣
-  return newCur === 'TWD' ? twd : twd * r;      // 再換到目標幣別
+  const twd = oldCur === HOME_CUR ? a : a / rateAt(rates, oldCur);   // 先換成台幣
+  return newCur === HOME_CUR ? twd : twd * rateAt(rates, newCur);    // 再換到目標幣別
 }
 // 多列新增解析：rows=[{date,account,cat,subcat,item,amount}]；回 {valid:[txn],errors:[{i,msg}],emptyCount}
 function parseMultiRowEntries(rows, accountIds) {
@@ -1464,10 +1569,10 @@ function gidGroupSumText(curSums, sumTWD, hideConv) {
   if (keys.length === 1) {
     const c = keys[0];
     let s = fmt(curSums[c], c);
-    if (c !== 'TWD' && !hideConv) s += `（≒ NT$${Math.round(sumTWD || 0).toLocaleString('en-US')}）`;
+    if (c !== HOME_CUR && !hideConv) s += `（≒ ${fmt(sumTWD || 0, HOME_CUR)}）`;
     return s;
   }
-  return 'NT$' + Math.round(sumTWD || 0).toLocaleString('en-US');
+  return fmt(sumTWD || 0, HOME_CUR);
 }
 // 消費稅計算（純函式）：rows=[{amount,rate}]（rate=8/10，0/缺＝不計）；mode='add'外加/'incl'內含/其他=不計
 //   外加：各稅率一筆稅額 taxLines=[{rate,base,tax}]（tax=round(base×rate%)）；gross=未稅+稅
@@ -1519,10 +1624,11 @@ function runBatchFeeSelfTest() {
   ok(s.from === 'b' && s.to === 'a' && s.amount === 500 && s.toAmount === 500, 'swap 同幣別 toAmount=null→500');
 
   // convertAmountOnAccountChange
-  ok(convertAmountOnAccountChange(1000, 'JPY', 'JPY', 4.98, 'convert') === 1000, 'convert 同幣別不變');
-  ok(convertAmountOnAccountChange(1000, 'TWD', 'JPY', 5, 'keep') === 1000, 'keep 保持原數字');
-  ok(convertAmountOnAccountChange(1000, 'TWD', 'JPY', 5, 'convert') === 5000, 'convert TWD→JPY ×rate');
-  ok(convertAmountOnAccountChange(5000, 'JPY', 'TWD', 5, 'convert') === 1000, 'convert JPY→TWD ÷rate');
+  ok(convertAmountOnAccountChange(1000, 'JPY', 'JPY', { JPY: 4.98 }, 'convert') === 1000, 'convert 同幣別不變');
+  ok(convertAmountOnAccountChange(1000, 'TWD', 'JPY', { JPY: 5 }, 'keep') === 1000, 'keep 保持原數字');
+  ok(convertAmountOnAccountChange(1000, 'TWD', 'JPY', { JPY: 5 }, 'convert') === 5000, 'convert TWD→JPY ×rate');
+  ok(convertAmountOnAccountChange(5000, 'JPY', 'TWD', { JPY: 5 }, 'convert') === 1000, 'convert JPY→TWD ÷rate');
+  ok(convertAmountOnAccountChange(5000, 'JPY', 'USD', { JPY: 5, USD: 0.03 }, 'convert') === 30, 'convert 外幣→外幣（日→美）');
 
   // parseMultiRowEntries
   const ids = new Set(['twd', 'jpy']);
@@ -1761,10 +1867,15 @@ function sumItemHTML(t, withCheck, ctx) {
 }
 
 /* ===================== 格式化 ===================== */
+// 多幣別金額格式化：符號查 CUR_META；dp=0 的幣別（台幣/日圓/韓元…）行為與舊版完全相同
 function fmt(amt, cur) {
-  const n = Math.round(Number(amt) || 0);
-  const s = Math.abs(n).toLocaleString('en-US');
-  return (n < 0 ? '-' : '') + (cur === 'TWD' ? 'NT$' : '¥') + s;
+  const dp = curMeta(cur).dp;
+  const raw = Number(amt) || 0;
+  const n = dp > 0 ? Math.round(raw * 100) / 100 : Math.round(raw);
+  const s = dp > 0
+    ? Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : Math.abs(n).toLocaleString('en-US');
+  return (n < 0 ? '-' : '') + curSym(cur) + s;
 }
 const PALETTE = ['#34d399','#60a5fa','#f472b6','#f59e0b','#a78bfa','#2dd4bf','#fb7185','#fbbf24'];
 
@@ -1787,8 +1898,39 @@ function renderTitle() {
   if (el) el.textContent = '✈️ ' + name;
   document.title = name.replace(/[\r\n]+/g, ' ');
 }
+// 有帳戶在使用的外幣（依帳戶顯示順序、去重）；沒有帳戶時退回匯率表中的幣別
+function foreignCursInUse() {
+  const out = [];
+  for (const a of (data.accounts || [])) {
+    const c = a.currency;
+    if (c && c !== HOME_CUR && out.indexOf(c) < 0) out.push(c);
+  }
+  if (!out.length) for (const c of Object.keys(data.rates || {})) if (c !== HOME_CUR && out.indexOf(c) < 0) out.push(c);
+  return out;
+}
+// 主要外幣（台幣帳戶的換算預覽用）；全台幣時回 null
+function primaryForeignCur() { const l = foreignCursInUse(); return l.length ? l[0] : null; }
+// 匯率表中已有值、或使用中的所有外幣（設定頁匯率管理用）
+function ratedCurs() {
+  const out = foreignCursInUse();
+  for (const c of Object.keys(data.rates || {})) if (c !== HOME_CUR && out.indexOf(c) < 0) out.push(c);
+  return out;
+}
+// 匯率摘要（提示文字用）：例「1 台幣 ≒ ¥4.98、$0.032」
+function rateSummaryText() {
+  const curs = foreignCursInUse();
+  if (!curs.length) return '無外幣帳戶';
+  return '1 台幣 ≒ ' + curs.map(c => curSym(c) + rateOf(c)).join('、');
+}
 function renderRate() {
-  document.getElementById('rate-big').textContent = `1 元台幣 ≒ ¥${data.rate}　|　¥100 ≒ NT$${(100 / data.rate).toFixed(1)}`;
+  const big = document.getElementById('rate-big');
+  const curs = foreignCursInUse();
+  if (!curs.length) big.textContent = '目前沒有外幣帳戶（全部為台幣）';
+  else big.innerHTML = curs.map(c => {
+    const r = rateOf(c);
+    const ref = curMeta(c).dp > 0 ? 1 : 100;                 // 小數幣別看「1 單位」、整數幣別看「100 單位」
+    return `1 元台幣 ≒ ${curSym(c)}${r}　|　${curSym(c)}${ref} ≒ NT$${(ref / r).toFixed(1)}`;
+  }).join('<br>');
   document.getElementById('rate-src').textContent = '來源：' + (data.rateSource || '手動') + (data.rateUpdatedAt ? '（' + data.rateUpdatedAt + '）' : '');
 }
 
@@ -1856,9 +1998,8 @@ function expandForm() {
 
 function renderTotals() {
   const t = computeTotals();
-  document.getElementById('total-twd').textContent = fmt(t.totalTWD, 'TWD');
-  document.getElementById('total-breakdown').textContent =
-    `日幣消費 ${fmt(t.jpy, 'JPY')}（≒NT$${Math.round(toTWD(t.jpy, 'JPY')).toLocaleString('en-US')}）　＋　台幣消費 ${fmt(t.twd, 'TWD')}`;
+  document.getElementById('total-twd').textContent = fmt(t.totalTWD, HOME_CUR);
+  document.getElementById('total-breakdown').textContent = totalsBreakdownText(t);
 }
 
 function setChart(m) {
@@ -2132,7 +2273,7 @@ function renderSummary() {
   if (sec.core) {
     html += `<div class="modal-section"><h3>核心摘要</h3><div class="sum-stats">` +
       `<div class="sum-stat wide"><div class="k">總花費${hideRate() ? '' : '（台幣換算）'}</div><div class="v sum-neg">${fmt(s.totals.totalTWD, 'TWD')}</div>` +
-      (hideRate() ? '' : `<div class="sub">日幣 ${fmt(s.totals.jpy, 'JPY')}（≒NT$${Math.round(toTWD(s.totals.jpy, 'JPY')).toLocaleString('en-US')}）　＋　台幣 ${fmt(s.totals.twd, 'TWD')}</div>`) + `</div>` +
+      (hideRate() ? '' : `<div class="sub">${totalsBreakdownText(s.totals)}</div>`) + `</div>` +
       `<div class="sum-stat"><div class="k">每日平均</div><div class="v sum-neg">${fmt(s.avgTWD, 'TWD')}</div><div class="sub">${s.days} 天</div></div>` +
       `<div class="sum-stat"><div class="k">消費筆數</div><div class="v">${s.count}</div><div class="sub">筆</div></div>` +
       `</div></div>`;
@@ -2197,7 +2338,7 @@ function renderSummary() {
         `<span class="sum">${fmtCur(tr.amount, cur)}</span></div>`).join('') + `</div>`;
     }
     if (s.settle.skipped > 0) body += `<div class="settle-note">另有 ${s.settle.skipped} 筆待檢查的分帳未列入結算。</div>`;
-    html += `<div class="modal-section"><h3>分攤結算（${cur === 'JPY' ? '日幣' : '台幣'}）</h3>${body}</div>`;
+    html += `<div class="modal-section"><h3>分攤結算（${escapeHtml(curName(cur))}）</h3>${body}</div>`;
   }
 
   // 區塊 E：消費明細（逐筆可勾選是否入鏡 + 可 inline 編輯）
@@ -2643,6 +2784,12 @@ function updateToAmtField() {
   document.getElementById('toamt-field').style.display = cross ? '' : 'none';
   if (cross && to) document.getElementById('toamt-label').textContent = `實際入帳金額（${to.currency}）`;
 }
+// 金額輸入的換算預覽文字：外幣帳戶→顯示台幣；台幣帳戶→顯示主要外幣（無外幣帳戶則不顯示）
+function convPreviewText(amt, cur) {
+  if (cur !== HOME_CUR) return `≒ ${fmt(toTWD(amt, cur), HOME_CUR)}`;
+  const pf = primaryForeignCur();
+  return pf ? `≒ ${fmt(toCur(amt, HOME_CUR, pf), pf)}` : '';
+}
 function updatePreview() {
   const type = getType();
   const amt = Number(document.getElementById('f-amount').value) || 0;
@@ -2652,15 +2799,13 @@ function updatePreview() {
     if (isSplitOn()) updateSplitSum();   // 🧾 換帳戶時同步拆分合計的幣別顯示
     const a = acctById(document.getElementById('f-account').value);
     if (!a || !amt) { prev.textContent = ''; return; }
-    prev.textContent = a.currency === 'TWD'
-      ? `≒ ¥${Math.round(toJPY(amt, 'TWD')).toLocaleString('en-US')}`
-      : `≒ NT$${Math.round(toTWD(amt, 'JPY')).toLocaleString('en-US')}`;
+    prev.textContent = convPreviewText(amt, a.currency);
   } else {
     const from = acctById(document.getElementById('f-from').value);
     const to = acctById(document.getElementById('f-to').value);
     updateToAmtField();
     if (from && to && from.currency !== to.currency) {
-      const suggest = to.currency === 'JPY' ? toJPY(amt, from.currency) : toTWD(amt, from.currency);
+      const suggest = toCur(amt, from.currency, to.currency);
       const toInput = document.getElementById('f-toamount');
       if (!toamtTouched && amt) toInput.value = Math.round(suggest);
       prev.textContent = amt ? `建議入帳 ≒ ${fmt(suggest, to.currency)}（可改）` : '';
@@ -2873,45 +3018,72 @@ function fetchWithTimeout(url, ms) {
   const id = setTimeout(() => ctrl.abort(), ms);
   return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(id));
 }
+// 台銀 CSV → { 幣別代碼: 1 該幣 = ? 台幣 }（純函式，?test=1 自測）
+// 只取 parts[12]＝本行現金賣出（既有實作已驗證之欄位）；無現金報價的幣別留給備援來源補
+function parseBotCsv(text) {
+  const out = {};
+  for (const raw of String(text || '').split('\n')) {
+    const parts = raw.trim().split(',');
+    const code = (parts[0] || '').trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(code)) continue;                 // 跳過表頭與雜訊列
+    const cashSell = parseFloat(parts[12]);
+    if (Number.isFinite(cashSell) && cashSell > 0) out[code] = cashSell;
+  }
+  return out;
+}
+// 保留合理有效位數：>=1 取 4 位小數（沿用舊行為）；<1 取 6 位有效數字（小額幣別不失真）
+function normRate(v) { const n = Number(v); return n >= 1 ? +n.toFixed(4) : +n.toPrecision(6); }
+// 匯率合理性閘：與現值差距超過 50% 視為異常（避免欄位解析錯誤寫入壞值）
+// 現值為 1（新增幣別的佔位）或無現值時不設限
+function rateSane(newRate, oldRate) {
+  if (!(Number.isFinite(newRate) && newRate > 0)) return false;
+  const o = Number(oldRate);
+  if (!(Number.isFinite(o) && o > 0) || Math.abs(o - 1) < 1e-9) return true;
+  const ratio = newRate / o;
+  return ratio >= 0.5 && ratio <= 1.5;
+}
 async function updateRate() {
   const btn = document.getElementById('rate-btn');
   btn.disabled = true; const old = btn.textContent; btn.textContent = '更新中…';
+  const wanted = ratedCurs();                                 // 只更新目前追蹤的外幣
+  if (!wanted.length) { btn.disabled = false; btn.textContent = old; toast('目前沒有外幣帳戶，不需要匯率'); return; }
+  const got = {}, srcs = [], skipped = [];
+  const take = (cur, perTWD, label) => {                      // perTWD＝1 台幣 = ? 該幣
+    const v = normRate(perTWD);
+    if (!rateSane(v, data.rates ? data.rates[cur] : null)) { skipped.push(curName(cur)); return; }
+    got[cur] = v; if (srcs.indexOf(label) < 0) srcs.push(label);
+  };
   try {
-    // 主來源：台灣銀行現金匯率（透過 CORS proxy）
-    const proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://rate.bot.com.tw/xrt/flcsv/0/day');
-    const res = await fetchWithTimeout(proxied, 12000);
-    const text = await res.text();
-    const line = text.split('\n').find(l => l.trim().toUpperCase().startsWith('JPY,'));
-    if (line) {
-      const parts = line.split(',');
-      const cashSell = parseFloat(parts[12]); // 現金賣出（台幣/日圓）
-      if (cashSell > 0) {
-        data.rate = +(1 / cashSell).toFixed(4);
-        data.rateSource = '台灣銀行現金賣出';
-        data.rateUpdatedAt = nowStr();
-        save(); render();
-        toast('匯率已更新：台銀現金賣出，1 元台幣 ≒ ¥' + data.rate);
-        return;
-      }
-    }
-    throw new Error('解析台銀資料失敗');
-  } catch (e1) {
-    // 備援：參考中價 API
+    // 主來源：台灣銀行現金賣出（透過 CORS proxy；一次取全幣別）
     try {
-      const res2 = await fetchWithTimeout('https://open.er-api.com/v6/latest/TWD', 10000);
-      const j = await res2.json();
-      if (j && j.rates && j.rates.JPY) {
-        data.rate = +Number(j.rates.JPY).toFixed(4);
-        data.rateSource = '參考中價（非現金匯率）';
-        data.rateUpdatedAt = nowStr();
-        save(); render();
-        toast('台銀暫無法連線，已改用參考中價：1 元台幣 ≒ ¥' + data.rate);
-        return;
-      }
-      throw new Error('備援也失敗');
-    } catch (e2) {
-      toast('匯率更新失敗，可到「⚙️ 設定」手動輸入匯率');
+      const proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://rate.bot.com.tw/xrt/flcsv/0/day');
+      const res = await fetchWithTimeout(proxied, 9000);
+      const map = parseBotCsv(await res.text());              // { USD: 31.4, JPY: 0.2008, ... }（台幣/該幣）
+      for (const c of wanted) if (map[c] > 0) take(c, 1 / map[c], '台銀現金賣出');
+    } catch (e1) { /* 台銀不可用 → 落到備援 */ }
+    // 備援：參考中價（回傳即為「1 台幣 = ? 該幣」，與本 App 慣例同向）
+    const missing = wanted.filter(c => !(got[c] > 0) && skipped.indexOf(curName(c)) < 0);
+    if (missing.length) {
+      try {
+        const res2 = await fetchWithTimeout('https://open.er-api.com/v6/latest/TWD', 10000);
+        const j = await res2.json();
+        const r = (j && j.rates) || {};
+        for (const c of missing) if (Number(r[c]) > 0) take(c, Number(r[c]), '參考中價');
+      } catch (e2) { /* 備援也失敗 */ }
     }
+    const okCurs = Object.keys(got);
+    if (!okCurs.length) {
+      toast('匯率更新失敗，可到「⚙️ 設定」手動輸入匯率' + (skipped.length ? `（${skipped.join('、')} 取得值異常已略過）` : ''));
+      return;
+    }
+    data.rates = Object.assign({}, data.rates, got);
+    data.rateSource = srcs.join('＋') + (srcs.indexOf('參考中價') >= 0 ? '（非現金匯率）' : '');
+    data.rateUpdatedAt = nowStr();
+    save(); render();
+    if (document.getElementById('settings-modal').classList.contains('show')) renderRateEditor();
+    const miss = wanted.filter(c => okCurs.indexOf(c) < 0);
+    toast('匯率已更新：' + okCurs.map(c => `${curName(c)} ${curSym(c)}${data.rates[c]}`).join('、') +
+      (miss.length ? `\n（${miss.map(curName).join('、')} 查不到，請手動輸入）` : ''));
   } finally {
     btn.disabled = false; btn.textContent = old;
   }
@@ -2920,7 +3092,7 @@ async function updateRate() {
 /* ===================== 設定 ===================== */
 function openSettings() {
   document.getElementById('s-ledger-name').value = data.ledgerName || '';
-  document.getElementById('s-rate').value = data.rate;
+  renderRateEditor();
   document.getElementById('s-cats').value = serializeCats(data.categories);
   renderAcctEditor();
   document.getElementById('s-split-enabled').checked = splitEnabled();
@@ -2928,6 +3100,72 @@ function openSettings() {
   document.getElementById('settings-modal').classList.add('show');
 }
 function closeSettings() { document.getElementById('settings-modal').classList.remove('show'); }
+
+/* —— 設定：多幣別匯率表 —— */
+// 每列兩個輸入互為倒數（1 台幣 = X 外幣 ⟷ 1 外幣 = Y 台幣），改一邊自動算另一邊
+function renderRateEditor() {
+  const el = document.getElementById('rate-editor');
+  if (!el) return;
+  const curs = ratedCurs();
+  el.innerHTML = curs.length ? curs.map(c => {
+    const r = rateOf(c);
+    const sym = escapeHtml(curSym(c).trim());
+    return `<div class="rate-edit">` +
+      `<span class="rate-cur">${escapeHtml(curName(c))} <b>${escapeHtml(c)}</b></span>` +
+      `<span class="rate-eq">1 NT$ =</span>` +
+      `<input type="number" inputmode="decimal" step="any" class="rate-fwd" data-cur="${escapeHtml(c)}" value="${r}" oninput="syncRateRow('${escapeHtml(c)}','fwd')" />` +
+      `<span class="rate-eq">${sym}　｜　1 ${sym} =</span>` +
+      `<input type="number" inputmode="decimal" step="any" class="rate-inv" data-cur="${escapeHtml(c)}" value="${r > 0 ? +(1 / r).toFixed(6) : ''}" oninput="syncRateRow('${escapeHtml(c)}','inv')" />` +
+      `<span class="rate-eq">NT$</span>` +
+      `<button class="btn btn-sm btn-danger" title="移除此幣別匯率" aria-label="移除此幣別匯率" onclick="removeRateRow('${escapeHtml(c)}')">✕</button>` +
+      `</div>`;
+  }).join('') : `<div class="hint">目前沒有外幣帳戶。在下方「帳戶管理」把帳戶幣別改成外幣，或用下面的選單新增幣別匯率。</div>`;
+  renderAddCurSelect();
+}
+function renderAddCurSelect() {
+  const sel = document.getElementById('s-add-cur');
+  if (!sel) return;
+  const have = ratedCurs();
+  const opts = CUR_CODES.filter(c => c !== HOME_CUR && have.indexOf(c) < 0);
+  sel.innerHTML = opts.length ? opts.map(c => `<option value="${c}">${escapeHtml(curName(c))} ${escapeHtml(c)}</option>`).join('')
+                              : '<option value="">（已全部加入）</option>';
+}
+function syncRateRow(cur, which) {
+  const fwd = document.querySelector(`.rate-fwd[data-cur="${cur}"]`);
+  const inv = document.querySelector(`.rate-inv[data-cur="${cur}"]`);
+  if (!fwd || !inv) return;
+  if (which === 'fwd') { const v = Number(fwd.value); inv.value = v > 0 ? +(1 / v).toFixed(6) : ''; }
+  else { const v = Number(inv.value); fwd.value = v > 0 ? +(1 / v).toFixed(6) : ''; }
+}
+// 讀回匯率編輯器目前的值（空白/壞值 → 保留原值，不清成 1）
+function readRateEditor() {
+  const rows = document.querySelectorAll('#rate-editor .rate-fwd');
+  if (!rows.length) return null;
+  const out = {};
+  rows.forEach(inp => {
+    const c = inp.dataset.cur; if (!isValidCur(c) || c === HOME_CUR) return;
+    const v = Number(inp.value);
+    out[c] = (Number.isFinite(v) && v > 0) ? v : rateOf(c);
+  });
+  return out;
+}
+function addRateRow() {
+  const sel = document.getElementById('s-add-cur');
+  const c = sel ? sel.value : '';
+  if (!isValidCur(c) || c === HOME_CUR) return;
+  const cur = readRateEditor();                    // 先保住已輸入未存的值
+  data.rates = Object.assign({}, cur || data.rates);
+  if (!(data.rates[c] > 0)) data.rates[c] = 1;     // 佔位，待手動輸入或按「更新最新匯率」
+  renderRateEditor();
+  toast(`已加入 ${curName(c)}，請輸入匯率或按「🔄 更新最新匯率」`);
+}
+function removeRateRow(c) {
+  if (foreignCursInUse().indexOf(c) >= 0) { toast('有帳戶正在使用這個幣別，請先改掉帳戶幣別'); return; }
+  const cur = readRateEditor() || Object.assign({}, data.rates);
+  delete cur[c];
+  data.rates = cur;
+  renderRateEditor();
+}
 function renderAcctEditor() {
   const el = document.getElementById('acct-editor');
   el.innerHTML = '';
@@ -2937,8 +3175,7 @@ function renderAcctEditor() {
     row.innerHTML = `
       <input type="text" value="${escapeHtml(a.name)}" data-i="${i}" data-k="name" placeholder="名稱" />
       <select data-i="${i}" data-k="currency">
-        <option value="JPY" ${a.currency === 'JPY' ? 'selected' : ''}>日圓</option>
-        <option value="TWD" ${a.currency === 'TWD' ? 'selected' : ''}>台幣</option>
+        ${CUR_CODES.map(c => `<option value="${c}" ${a.currency === c ? 'selected' : ''}>${escapeHtml(curName(c))}</option>`).join('')}
       </select>
       <select data-i="${i}" data-k="kind">
         <option value="prepaid" ${a.kind === 'prepaid' ? 'selected' : ''}>儲值卡</option>
@@ -3002,8 +3239,20 @@ function saveSettings() {
   flushAcctEditorInputs();
   const ln = (document.getElementById('s-ledger-name').value || '').trim().slice(0, 80);
   data.ledgerName = ln || '旅行記帳';
-  const r = Number(document.getElementById('s-rate').value);
-  if (r > 0 && r !== data.rate) { data.rate = r; data.rateSource = '手動設定'; data.rateUpdatedAt = nowStr(); }
+  // 匯率表：讀回每列（1 台幣 = X 該幣）；有變動才更新來源與時間
+  const newRates = readRateEditor();
+  if (newRates) {
+    const keys = new Set(Object.keys(newRates).concat(Object.keys(data.rates || {})));
+    let changed = false;
+    for (const k of keys) if (Number((data.rates || {})[k]) !== Number(newRates[k])) { changed = true; break; }
+    if (changed) { data.rates = newRates; data.rateSource = '手動設定'; data.rateUpdatedAt = nowStr(); }
+  }
+  // 帳戶改成尚無匯率的幣別 → 補佔位 1 並提醒（避免靜默用 1:1 換算）
+  const missingCur = foreignCursInUse().filter(c => !(Number((data.rates || {})[c]) > 0));
+  if (missingCur.length) {
+    missingCur.forEach(c => { data.rates[c] = 1; });
+    setTimeout(() => toast(`⚠️ ${missingCur.map(curName).join('、')} 尚未設定匯率（暫以 1:1 計算），請到設定輸入或按「🔄 更新最新匯率」`), 600);
+  }
   const cats = parseCats(document.getElementById('s-cats').value);
   if (Object.keys(cats).length) data.categories = cats;
   try { localStorage.setItem('jp_split_enabled', document.getElementById('s-split-enabled').checked ? '1' : '0'); } catch (e) {}
@@ -3035,11 +3284,11 @@ function sanitizeFilename(s) {
 }
 // 清洗匯入資料：避免被竄改的 JSON 注入或污染（縱深防禦）
 function sanitizeImport(d) {
-  const CUR = ['JPY', 'TWD'];
   d.ledgerName = (typeof d.ledgerName === 'string' && d.ledgerName.trim()) ? d.ledgerName.trim().slice(0, 80) : '旅行記帳';
   d.rate = Number(d.rate) > 0 ? Number(d.rate) : defaultData().rate; // 壞匯率 → 退回預設，避免 toTWD 異常
+  migrateRates(d);                                                   // 多幣別：舊單一 rate → rates；未知幣別代碼剝除
   d.accounts = (d.accounts || []).map(a => ({ ...a,
-    currency: CUR.includes(a.currency) ? a.currency : 'JPY',
+    currency: isValidCur(a.currency) ? a.currency : 'JPY',            // 幣別白名單（未知代碼 → 日圓）
     initial: Number(a.initial) || 0, // 數字化，堵死匯入竄改 initial 的注入
     color: /^#[0-9a-f]{3,8}$/i.test(a.color || '') ? a.color : '#888' }));
   const seen = new Set();
@@ -3239,9 +3488,9 @@ function memberName(id) {
   const m = data.members.find(x => x.id === id);
   return m ? m.name : '（已刪成員）';
 }
-// 把「台幣整數」依顯示幣別呈現（結算用：JPY 以目前全域匯率回估）
+// 把結算整數依顯示幣別呈現（結算用：外幣以目前匯率回估）
 function fmtCur(amt, cur) {
-  return (cur === 'TWD' ? 'NT$' : '¥') + Math.round(amt).toLocaleString('en-US');
+  return curSym(cur) + Math.round(amt).toLocaleString('en-US');
 }
 
 /* —— 收合 —— */
@@ -3272,10 +3521,40 @@ function applySplitEnabled() {
   const c = document.getElementById('split-card');
   if (c) c.classList.toggle('split-hidden', !splitEnabled());
 }
-function setSettleCur(cur) { settleCur = (cur === 'JPY') ? 'JPY' : 'TWD'; renderSettle(); }
+// 分帳／結算可選幣別：台幣 ＋ 使用中外幣 ＋ 既有分帳已用過的幣別（避免舊資料的幣別從選單消失）
+function splitCurOptions() {
+  const out = [HOME_CUR];
+  for (const c of foreignCursInUse()) if (out.indexOf(c) < 0) out.push(c);
+  for (const s of (data.splits || [])) if (s.currency && out.indexOf(s.currency) < 0) out.push(s.currency);
+  return out;
+}
+function curOptionHTML(c, selected) {
+  return `<option value="${c}"${selected === c ? ' selected' : ''}>${escapeHtml(curName(c))} ${escapeHtml(curSym(c).trim())}</option>`;
+}
+function refreshSplitCurSelect(value) {
+  const sel = document.getElementById('sp-currency');
+  if (!sel) return;
+  const opts = splitCurOptions();
+  const v = opts.indexOf(value) >= 0 ? value : (opts.indexOf('JPY') >= 0 ? 'JPY' : opts[0]);
+  sel.innerHTML = opts.map(c => curOptionHTML(c, v)).join('');
+  sel.value = v;
+}
+function refreshSettleCurSelect() {
+  const sel = document.getElementById('settle-cur');
+  if (!sel) return;
+  const opts = splitCurOptions();
+  if (opts.indexOf(settleCur) < 0) settleCur = HOME_CUR;      // 幣別被移除 → 退回台幣域
+  sel.innerHTML = opts.map(c => curOptionHTML(c, settleCur)).join('');
+  sel.value = settleCur;
+}
+function setSettleCur(cur) {
+  settleCur = (splitCurOptions().indexOf(cur) >= 0) ? cur : HOME_CUR;
+  renderSettle();
+}
 
 /* —— 主渲染 —— */
 function renderSplit() {
+  refreshSettleCurSelect();
   renderSplitMembers();
   renderSplitList();
   renderSettle();
@@ -3339,7 +3618,7 @@ function sharesLineHTML(s) {
   const sh = splitSharesNative(s);
   const ids = Object.keys(sh);
   if (ids.length === 0) return '';
-  const sym = s.currency === 'TWD' ? 'NT$' : '¥';
+  const sym = curSym(s.currency);
   return ids.map(id => `${escapeHtml(memberName(id))} ${sym}${Math.round(sh[id]).toLocaleString('en-US')}`).join('　');
 }
 function renderSplitList() {
@@ -3352,7 +3631,7 @@ function renderSplitList() {
   }
   const list = [...data.splits].sort((a, b) => (a.date < b.date ? 1 : (a.date > b.date ? -1 : 0)));
   el.innerHTML = undoBar + list.map(s => {
-    const sym = s.currency === 'TWD' ? 'NT$' : '¥';
+    const sym = curSym(s.currency);
     const amt = Math.round(Number(s.amount) || 0);
     const twd = Math.round(splitToTWD(amt, s));
     const tags = [];
@@ -3368,7 +3647,7 @@ function renderSplitList() {
         (sl ? `<div class="shares-line">${sl}</div>` : '') +
       `</div>` +
       `<div class="amt"><div class="v">${sym}${amt.toLocaleString('en-US')}</div>` +
-        (s.currency === 'JPY' ? `<div class="twd">≒NT$${twd.toLocaleString('en-US')}</div>` : '') + `</div>` +
+        (s.currency !== HOME_CUR ? `<div class="twd">≒NT$${twd.toLocaleString('en-US')}</div>` : '') + `</div>` +
       `<div class="ops">` +
         `<button class="btn btn-sm" onclick="editSplit('${s.id}')">✎</button>` +
         `<button class="btn btn-sm btn-danger" onclick="delSplit('${s.id}')">🗑</button>` +
@@ -3440,6 +3719,12 @@ function refreshSplitPayer() {
   sel.innerHTML = opts || '<option value="">（請先新增成員）</option>';
   if (cur && data.members.some(m => m.id === cur)) sel.value = cur;
 }
+// 分帳表單目前選的幣別（白名單驗證；異常回日圓＝沿用舊預設）
+function spCurValue() {
+  const el = document.getElementById('sp-currency');
+  const v = el ? el.value : '';
+  return isValidCur(v) ? v : 'JPY';
+}
 function getSpMode() {
   const r = document.querySelector('input[name="spmode"]:checked');
   return r ? r.value : 'equal';
@@ -3451,7 +3736,7 @@ function openSplitForm() {
   document.getElementById('split-modal-title').textContent = '新增分帳費用';
   document.getElementById('sp-item').value = '';
   document.getElementById('sp-amount').value = '';
-  document.getElementById('sp-currency').value = 'JPY';
+  refreshSplitCurSelect('JPY');
   document.getElementById('sp-date').value = today();
   document.getElementById('sp-note').value = '';
   document.querySelector('input[name="spmode"][value="equal"]').checked = true;
@@ -3472,7 +3757,7 @@ function editSplit(id) {
   document.getElementById('split-modal-title').textContent = '編輯分帳費用';
   document.getElementById('sp-item').value = s.item || '';
   document.getElementById('sp-amount').value = s.amount || '';
-  document.getElementById('sp-currency').value = s.currency || 'JPY';
+  refreshSplitCurSelect(s.currency || 'JPY');
   document.getElementById('sp-date').value = s.date || today();
   document.getElementById('sp-note').value = s.note || '';
   document.querySelector(`input[name="spmode"][value="${s.mode || 'equal'}"]`).checked = true;
@@ -3528,11 +3813,12 @@ function onShareInput(id, val) {
 }
 // 即時草稿（供預覽與差額驗證；金額/幣別讀 DOM、分攤讀 _spDraft）
 function buildDraftSplit() {
+  const cur = spCurValue();
   return {
     amount: Number(document.getElementById('sp-amount').value),
-    currency: document.getElementById('sp-currency').value === 'TWD' ? 'TWD' : 'JPY',
+    currency: cur,
     mode: getSpMode(),
-    rate: Number(data.rate) || 1,
+    rate: rateOf(cur),
     payerId: document.getElementById('sp-payer').value || '',
     participants: _spDraft.participants.slice(),
     amounts: _spDraft.amounts,
@@ -3544,8 +3830,8 @@ function updateSplitBalance() {
   if (!bal) return;
   const mode = getSpMode();
   const amount = Math.round(Number(document.getElementById('sp-amount').value) || 0);
-  const cur = document.getElementById('sp-currency').value === 'TWD' ? 'TWD' : 'JPY';
-  const sym = cur === 'TWD' ? 'NT$' : '¥';
+  const cur = spCurValue();
+  const sym = curSym(cur);
   // 每人即時預覽
   const sh = (amount > 0) ? splitSharesNative(buildDraftSplit()) : Object.create(null);
   data.members.forEach(m => {
@@ -3570,7 +3856,7 @@ function updateSplitBalance() {
 }
 function saveSplitForm() {
   const amount = Number(document.getElementById('sp-amount').value);
-  const currency = document.getElementById('sp-currency').value === 'TWD' ? 'TWD' : 'JPY';
+  const currency = spCurValue();
   const mode = getSpMode();
   const payerId = document.getElementById('sp-payer').value || '';
   const item = document.getElementById('sp-item').value.trim();
@@ -3578,8 +3864,8 @@ function saveSplitForm() {
   const date = document.getElementById('sp-date').value || today();
   const memberIds = new Set(data.members.map(m => m.id));
 
-  // §D 匯率快照：新增=現值；編輯且幣別不變且原為明確匯率=保留；估算(_rateUnknown)或改幣別=重新快照當下匯率
-  let rate = Number(data.rate) || 1;
+  // §D 匯率快照：新增=該幣現值；編輯且幣別不變且原為明確匯率=保留；估算(_rateUnknown)或改幣別=重新快照當下匯率
+  let rate = rateOf(currency);
   let old = null;
   if (splitEditingId) {
     old = data.splits.find(x => x.id === splitEditingId);
@@ -3657,9 +3943,7 @@ function updateFeePreview() {
   const amt = Number(document.getElementById('f-fee-amount').value) || 0;
   const prev = document.getElementById('fee-preview');
   if (!a || !amt) { prev.textContent = ''; return; }
-  prev.textContent = a.currency === 'TWD'
-    ? `≒ ¥${Math.round(toJPY(amt, 'TWD')).toLocaleString('en-US')}`
-    : `≒ NT$${Math.round(toTWD(amt, 'JPY')).toLocaleString('en-US')}`;
+  prev.textContent = convPreviewText(amt, a.currency);
 }
 
 /* ===================== 稅金計算 UI（單筆＋拆分共用；純計算在 computeSplitTax）===================== */
@@ -4103,7 +4387,7 @@ function batchSetAccount() {
     `<div class="field" id="batch-conv-wrap" style="display:none"><label>跨幣別時金額怎麼處理？</label>` +
     `<div class="seg-mini"><label><input type="radio" name="batchconv" value="keep" checked><span>保持原數字</span></label>` +
     `<label><input type="radio" name="batchconv" value="convert"><span>依匯率換算</span></label></div>` +
-    `<div class="hint" style="margin-top:6px">部分已選筆與新帳戶幣別不同，換算用目前匯率（1 台幣 ≒ ¥${data.rate}）。</div></div>`;
+    `<div class="hint" style="margin-top:6px">部分已選筆與新帳戶幣別不同，換算用目前匯率（${escapeHtml(rateSummaryText())}）。</div></div>`;
   openBatchModal('批量改支付帳戶', body, () => {
     const newId = document.getElementById('batch-acct').value;
     const na = acctById(newId);
@@ -4114,7 +4398,7 @@ function batchSetAccount() {
     for (const t of data.txns) {
       if (!selectedIds.has(t.id) || t.type !== 'expense') continue;
       const oa = acctById(t.account); const oldCur = oa ? oa.currency : 'JPY';
-      let v = convertAmountOnAccountChange(t.amount, oldCur, na.currency, data.rate, mode);
+      let v = convertAmountOnAccountChange(t.amount, oldCur, na.currency, data.rates, mode);
       if (mode === 'convert' && oldCur !== na.currency) v = Math.round(v);
       t.amount = v; t.account = newId; n++;
     }
@@ -4396,7 +4680,123 @@ function runFeatureSelfTest() {
   return { pass, fail, fails };
 }
 
-/* ?test=1：核心自測硬 gate（分帳 23 案 + 手續費/批量/多列 案 + 支付分組案 + 鑽取排序案 + 拆分組案 + 需求1-4 案）*/
+// ?test=1 自測（多幣別：幣別表 / 匯率遷移 / 換算 / 總額分桶 / 台銀解析 / 分帳跨幣）
+function runCurrencySelfTest() {
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (c, n) => { if (c) pass++; else { fail++; fails.push(n); } };
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+
+  // ① 幣別中繼資料 / 格式化（dp=0 的幣別必須與舊版逐字元相同）
+  ok(fmt(1234, 'TWD') === 'NT$1,234', 'fmt：台幣沿用 NT$（零回歸）');
+  ok(fmt(1234, 'JPY') === '¥1,234', 'fmt：日圓沿用 ¥（零回歸）');
+  ok(fmt(-1234.4, 'JPY') === '-¥1,234', 'fmt：負數與四捨五入沿用舊行為');
+  ok(fmt(12.5, 'USD') === '$12.50', 'fmt：美金 2 位小數');
+  ok(fmt(1234.567, 'EUR') === '€1,234.57', 'fmt：歐元千分位＋2 位小數');
+  ok(fmt(1000, 'KRW') === '₩1,000', 'fmt：韓元整數');
+  ok(fmt(50, 'XXX') === 'XXX 50', 'fmt：未知代碼不炸（代碼當前綴）');
+  ok(curName('JPY') === '日圓' && curName('ZZZ') === 'ZZZ', 'curName：未知代碼回代碼本身');
+  ok(isValidCur('USD') && !isValidCur('usd') && !isValidCur('') && !isValidCur('toString'), 'isValidCur：白名單且不吃原型鍵');
+
+  // ② 匯率表存取（純函式）
+  ok(rateAt({ JPY: 4.98 }, 'TWD') === 1, 'rateAt：台幣恆 1');
+  ok(rateAt({ JPY: 4.98 }, 'JPY') === 4.98, 'rateAt：查表');
+  ok(rateAt({ JPY: 4.98 }, 'USD') === 1 && rateAt(null, 'JPY') === 1, 'rateAt：缺值/空表回 1（不炸）');
+  ok(rateAt({ JPY: -3 }, 'JPY') === 1 && rateAt({ JPY: 'x' }, 'JPY') === 1, 'rateAt：壞值回 1');
+
+  // ③ 遷移（舊單一 rate → rates；冪等；壞值/未知代碼剝除）
+  let m = migrateRates({ rate: 4.98 });
+  ok(m.rates.JPY === 4.98 && m.rate === 4.98, '遷移：舊 rate 4.98 → rates.JPY 4.98（值不變）＋ legacy 鏡射');
+  ok(Object.keys(m.rates).length === 1 && m.rates.TWD === undefined, '遷移：台幣不進 rates');
+  m = migrateRates(migrateRates({ rate: 4.98 }));
+  ok(m.rates.JPY === 4.98, '遷移：冪等（跑兩次結果相同）');
+  m = migrateRates({ rate: 4.98, rates: { JPY: 5.2, USD: 0.0317 } });
+  ok(m.rates.JPY === 5.2 && m.rates.USD === 0.0317 && m.rate === 5.2, '遷移：已有 rates 不被舊 rate 覆蓋，鏡射跟著 rates.JPY');
+  m = migrateRates({ rate: 4.98, rates: { JPY: 5, TWD: 1, ZZZ: 3, EUR: -1, USD: 'x' } });
+  ok(m.rates.JPY === 5 && m.rates.TWD === undefined && m.rates.ZZZ === undefined && m.rates.EUR === undefined && m.rates.USD === undefined,
+     '遷移：台幣鍵/未知代碼/壞值全部剝除');
+  m = migrateRates({});
+  ok(m.rates.JPY === 4.98, '遷移：完全沒有匯率 → 預設 4.98');
+  m = migrateRates({ rate: 0 });
+  ok(m.rates.JPY === 4.98, '遷移：壞 rate → 預設 4.98');
+
+  // ④ 換算 / 總額分桶 / 明細文字（暫時替換全域 data，結束還原）
+  const _bak = data;
+  try {
+    data = {
+      rates: { JPY: 5, USD: 0.03125 },      // 1 台幣 = ¥5 = $0.03125（＝1 美金 32 台幣）
+      accounts: [
+        { id: 'tw', name: '台幣現金', currency: 'TWD', kind: 'prepaid', initial: 0 },
+        { id: 'jp', name: '日幣現金', currency: 'JPY', kind: 'prepaid', initial: 0 },
+        { id: 'us', name: '美金現金', currency: 'USD', kind: 'prepaid', initial: 0 },
+      ],
+      txns: [
+        { id: 't1', type: 'expense', date: '2026-07-01', account: 'jp', amount: 10000 },   // ≒ NT$2000
+        { id: 't2', type: 'expense', date: '2026-07-01', account: 'tw', amount: 500 },     // NT$500
+        { id: 't3', type: 'expense', date: '2026-07-02', account: 'us', amount: 20 },      // ≒ NT$640
+        { id: 't4', type: 'topup',   date: '2026-07-02', from: 'tw', to: 'jp', amount: 100 },
+      ],
+      splits: [], members: []
+    };
+    ok(toTWD(10000, 'JPY') === 2000, 'toTWD：日幣→台幣');
+    ok(toTWD(500, 'TWD') === 500, 'toTWD：台幣原值');
+    ok(toTWD(20, 'USD') === 640, 'toTWD：美金→台幣');
+    ok(toCur(10000, 'JPY', 'USD') === 62.5, 'toCur：日幣→美金（經台幣域）');
+    ok(toCur(640, 'TWD', 'USD') === 20, 'toCur：台幣→美金');
+    ok(toCur(77, 'USD', 'USD') === 77, 'toCur：同幣別原值');
+    ok(toJPY(400, 'TWD') === 2000, 'toJPY：相容包裝仍正確');
+    const t = computeTotals();
+    ok(t.byCur.JPY === 10000 && t.byCur.TWD === 500 && t.byCur.USD === 20, 'computeTotals：三幣別各自分桶（轉帳不計入）');
+    ok(t.totalTWD === 3140, 'computeTotals：總額＝2000+500+640');
+    ok(t.jpy === 10000 && t.twd === 500, 'computeTotals：twd/jpy 相容別名');
+    ok(computeTotals([]).totalTWD === 0 && Object.keys(computeTotals([]).byCur).length === 0, 'computeTotals：空輸入→0');
+    ok(totalsBreakdownText(t) === '日圓 ¥10,000（≒NT$2,000）　＋　美金 $20.00（≒NT$640）　＋　台幣 NT$500',
+       'totalsBreakdownText：外幣依台幣值大→小、台幣殿後');
+    ok(totalsBreakdownText({ byCur: { TWD: 300 }, totalTWD: 300 }) === '台幣 NT$300', 'totalsBreakdownText：純台幣不補換算');
+    ok(sameAsTWD(0, 'JPY') === true && sameAsTWD(100, 'USD') === false, 'sameAsTWD：多幣別仍正確');
+    ok(gidGroupSumText({ USD: 20 }, 640, false) === '$20.00（≒ NT$640）', 'gidGroupSumText：美金補台幣換算');
+    ok(gidGroupSumText({ USD: 20, JPY: 100 }, 660, false) === 'NT$660', 'gidGroupSumText：混幣別回台幣合計');
+    ok(foreignCursInUse().join(',') === 'JPY,USD', 'foreignCursInUse：依帳戶順序去重、排除台幣');
+    ok(primaryForeignCur() === 'JPY', 'primaryForeignCur：第一個外幣');
+    ok(convPreviewText(100, 'USD') === '≒ NT$3,200' && convPreviewText(400, 'TWD') === '≒ ¥2,000', 'convPreviewText：雙向預覽');
+    // 分帳跨幣：原幣→台幣用該筆快照；台幣→顯示幣別用目前匯率表
+    const sJPY = { amount: 1000, currency: 'JPY', rate: 4, mode: 'equal' };   // 快照 1 台幣 = ¥4
+    ok(splitToCur(1000, sJPY, 'TWD') === 250, 'splitToCur：原幣→台幣用該筆快照（非目前匯率）');
+    ok(splitToCur(1000, sJPY, 'JPY') === 1000, 'splitToCur：同幣別原值');
+    ok(splitToCur(1000, sJPY, 'USD', { USD: 0.03125 }) === 7.8125, 'splitToCur：日幣→美金（快照回台幣＋現匯出美金）');
+    ok(splitToCur(320, { amount: 320, currency: 'TWD', rate: 4 }, 'USD', { USD: 0.03125 }) === 10, 'splitToCur：台幣→美金');
+    // 結算域為第三種幣別時仍守恆（Σ淨額＝0）
+    const M3 = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }];
+    const S3 = [{ id: 's1', amount: 1000, currency: 'JPY', rate: 5, mode: 'equal', participants: ['a', 'b'], payerId: 'a' }];
+    const r3 = computeSettlement(M3, S3, 'USD', { USD: 0.03125 });
+    ok(near(r3.netInt.a + r3.netInt.b, 0), 'computeSettlement：美金域淨額守恆');
+    ok(r3.transfers.length === 1 && r3.transfers[0].from === 'b' && r3.transfers[0].to === 'a', 'computeSettlement：美金域轉帳方向正確');
+    ok(computeSettlement(M3, S3, 'ZZZ', {}).netInt.a === computeSettlement(M3, S3, 'TWD', {}).netInt.a, 'computeSettlement：非法幣別退回台幣域');
+  } finally { data = _bak; }
+
+  // ⑤ 台銀 CSV 解析（含無現金報價、雜訊列）
+  const csv = [
+    '幣別,匯率,現金,即期,遠期10天,遠期30天,遠期60天,遠期90天,遠期120天,遠期150天,遠期180天,匯率,現金,即期',
+    'USD,本行買入,30.5,30.9,0,0,0,0,0,0,0,本行賣出,31.4,31.05',
+    'JPY,本行買入,0.1950,0.1990,0,0,0,0,0,0,0,本行賣出,0.2008,0.2030',
+    'KRW,本行買入,0,0.0210,0,0,0,0,0,0,0,本行賣出,0,0.0225',
+    ',,,,,,,,,,,,,',
+  ].join('\n');
+  const bot = parseBotCsv(csv);
+  ok(bot.USD === 31.4 && bot.JPY === 0.2008, 'parseBotCsv：取現金賣出欄（1 該幣 = ? 台幣）');
+  ok(bot.KRW === undefined, 'parseBotCsv：無現金報價的幣別略過（交給備援）');
+  ok(bot['幣別'] === undefined && Object.keys(bot).length === 2, 'parseBotCsv：表頭與空列不入表');
+  ok(Object.keys(parseBotCsv('')).length === 0 && Object.keys(parseBotCsv(null)).length === 0, 'parseBotCsv：空輸入不炸');
+  ok(normRate(1 / 0.2008) === 4.9801, 'normRate：日圓沿用 4 位小數（與舊版同值）');
+  ok(normRate(1 / 31.4) === 0.0318471, 'normRate：小額幣別保 6 位有效數字（避免 4 位小數失真）');
+  ok(rateSane(5.1, 4.98) === true, 'rateSane：正常波動接受');
+  ok(rateSane(50, 4.98) === false && rateSane(0.5, 4.98) === false, 'rateSane：偏離逾 50% 擋下');
+  ok(rateSane(0.0318, 1) === true, 'rateSane：現值為 1（新增幣別佔位）不設限');
+  ok(rateSane(0.0318, null) === true && rateSane(0, 4.98) === false, 'rateSane：無現值放行、非正值擋下');
+
+  return { pass, fail, fails };
+}
+
+/* ?test=1：核心自測硬 gate（分帳 23 案 + 手續費/批量/多列 案 + 支付分組案 + 鑽取排序案 + 拆分組案 + 需求1-4 案 + 多幣別案）*/
 try {
   if (location.search.indexOf('test=1') >= 0) {
     const tr = runSplitSelfTest();
@@ -4405,9 +4805,10 @@ try {
     const tr4 = runDrillSortSelfTest();
     const tr5 = runGidGroupSelfTest();
     const tr6 = runFeatureSelfTest();
-    const fail = tr.fail + tr2.fail + tr3.fail + tr4.fail + tr5.fail + tr6.fail;
-    const fails = tr.fails.concat(tr2.fails, tr3.fails, tr4.fails, tr5.fails, tr6.fails);
-    const pass = tr.pass + tr2.pass + tr3.pass + tr4.pass + tr5.pass + tr6.pass;
+    const tr7 = runCurrencySelfTest();
+    const fail = tr.fail + tr2.fail + tr3.fail + tr4.fail + tr5.fail + tr6.fail + tr7.fail;
+    const fails = tr.fails.concat(tr2.fails, tr3.fails, tr4.fails, tr5.fails, tr6.fails, tr7.fails);
+    const pass = tr.pass + tr2.pass + tr3.pass + tr4.pass + tr5.pass + tr6.pass + tr7.pass;
     if (fail > 0) { console.error('自測 FAIL', fails); toast('⚠️ 自測失敗：\n' + fails.join('\n')); }
     else { console.log('自測 PASS ' + pass + ' / FAIL 0'); toast('✅ 自測全數通過（' + pass + ' 案）'); }
   }
