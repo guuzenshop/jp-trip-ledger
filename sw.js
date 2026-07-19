@@ -2,15 +2,17 @@
    策略：app 本體（index.html）網路優先、離線回退快取；
    匯率等跨源請求一律放行，離線失敗時由 App 既有 try-catch 優雅降級。 */
 // ⚠️ 改動 shell 資產（manifest/icon）時順手 +1 版本號，確保舊快取被清除
-const CACHE = 'jp-ledger-v18';
+const CACHE = 'jp-ledger-v19';
 const SHELL = ['./', './index.html', './manifest.json', './icon.svg', './icon-512.png'];
 
 self.addEventListener('install', e => {
+  // ⚠️ 刻意不 catch：SHELL 任一資產抓不到（機場/飯店 captive portal、Pages 短暫 5xx）就讓 install 失敗，
+  //    新 SW 不會 activate → 舊 SW 與其快取原封保住，離線仍可開 App。
+  //    （舊版在此 catch 後仍 skipWaiting，activate 隨即刪光舊快取 → 得到「新版號＋空快取」，離線就開不起來）
   e.waitUntil(
     caches.open(CACHE)
       .then(c => c.addAll(SHELL))
       .then(() => self.skipWaiting())
-      .catch(() => self.skipWaiting())
   );
 });
 

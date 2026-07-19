@@ -333,6 +333,8 @@
   .ledger-row .lg-ops { display:flex; gap:5px; flex-wrap:wrap; }
   .ledger-row .lg-cur { font-size:11.5px; color:var(--green); font-weight:700; white-space:nowrap; }
   .ledger-arch-head { margin-top:12px; font-size:12.5px; color:var(--muted); }
+  .ledger-bak-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; padding:8px 10px;
+    background:var(--panel2); border-radius:10px; font-size:12.5px; color:var(--muted); }
   /* 設定：多幣別匯率編輯列 */
   .rate-edit { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:7px 0; border-bottom:1px dashed var(--line); }
   .rate-edit:last-child { border-bottom:0; }
@@ -726,6 +728,7 @@
     <h2>📚 帳本</h2>
     <div class="hint">每趟旅程一本，各自獨立的帳戶、匯率、消費明細與分帳。直接修改名稱即可改名。</div>
     <div id="ledger-list"></div>
+    <div id="ledger-baks" style="display:none"></div>
 
     <div id="ledger-add" style="display:none">
       <div class="field">
@@ -963,6 +966,12 @@ function curSym(cur) { return curMeta(cur).sym; }
 function curName(cur) { const m = CUR_META[cur]; return m ? m.name : (cur || ''); }
 function isValidCur(c) { return typeof c === 'string' && Object.prototype.hasOwnProperty.call(CUR_META, c); }
 
+// 幣別最小單位倍率：dp=0（台幣/日圓/韓元…）→ 1；dp=2（美金/歐元…）→ 100
+// 分帳與批量換算一律在「最小單位」上做整數運算，dp=0 時倍率為 1 ⇒ 與舊版位元級相同
+function curScale(cur) { const dp = curMeta(cur).dp; return dp > 0 ? Math.pow(10, dp) : 1; }
+// 依幣別最小單位四捨五入（¥1 / $0.01）
+function roundCur(v, cur) { const s = curScale(cur); return Math.round((Number(v) || 0) * s) / s; }
+
 // 從匯率表取「1 台幣 = X 該幣」（純函式版；台幣恆 1、缺值/壞值回 1＝視同等值，不炸）
 function rateAt(rates, cur) {
   if (cur === HOME_CUR) return 1;
@@ -1047,16 +1056,19 @@ function cleanMap(obj, memberIds) {
   }
   return out;
 }
-// 單筆：每位參與者「原幣別整數」應分攤，Σ = round(amount)（明細與結算的單一真相源）
+// 單筆：每位參與者應分攤（以該幣最小單位為整數運算，回傳時換回顯示單位）
+// Σ = round(amount)；dp=0 幣別倍率為 1 ⇒ 與舊版位元級相同，dp=2 幣別則精確到分
 function splitSharesNative(split) {
   const out = Object.create(null);
-  const amount = Math.round(Number(split.amount) || 0);
+  const sc = curScale(split.currency);
+  const amount = Math.round((Number(split.amount) || 0) * sc);
   if (amount <= 0) return out;
+  const fin = o => { if (sc !== 1) for (const k of Object.keys(o)) o[k] = o[k] / sc; return o; };
   if (split.mode === 'amount') {
     const src = split.amounts || {};
     const ids = Object.keys(src).filter(id => { const v = Number(src[id]); return Number.isFinite(v) && v > 0; });
     if (ids.length === 0) return out;
-    const raw = ids.map(id => { const v = Number(src[id]); const floor = Math.floor(v); return { id, floor, rem: v - floor }; });
+    const raw = ids.map(id => { const v = Number(src[id]) * sc; const floor = Math.floor(v); return { id, floor, rem: v - floor }; });
     let assigned = 0;
     raw.forEach(r => { out[r.id] = r.floor; assigned += r.floor; });
     let left = amount - assigned;             // amount=round(總額)；回收餘數 → Σ=round(amount)（修 M1）
@@ -1064,7 +1076,7 @@ function splitSharesNative(split) {
     if (left > ids.length) left = ids.length;  // 壞資料(_needsReview)防明細膨脹；正常資料 left≤人數
     raw.sort((a, b) => b.rem - a.rem || (a.id < b.id ? -1 : 1)); // 最大餘數法；tie 取 id 小
     for (let i = 0; i < left; i++) out[raw[i % raw.length].id] += 1;
-    return out;
+    return fin(out);
   }
   if (split.mode === 'shares') {
     const src = split.shares || {};
@@ -1077,7 +1089,7 @@ function splitSharesNative(split) {
     let left = amount - assigned;
     raw.sort((a, b) => b.rem - a.rem || (a.id < b.id ? -1 : 1));
     for (let i = 0; i < left; i++) out[raw[i % raw.length].id] += 1;
-    return out;
+    return fin(out);
   }
   const ids = (split.participants || []).slice();
   if (ids.length === 0) return out;
@@ -1086,7 +1098,7 @@ function splitSharesNative(split) {
   for (const id of ids) out[id] = base;
   const sorted = ids.slice().sort((a, b) => a < b ? -1 : 1);
   for (let i = 0; i < left; i++) out[sorted[i]] += 1;
-  return out;
+  return fin(out);
 }
 // 結構不變量驗證（五道：金額>0、幣別、付款人∈成員、模式各自規則）；回傳錯誤陣列（空=通過）
 function validateSplit(split, memberIds) {
@@ -1109,7 +1121,9 @@ function validateSplit(split, memberIds) {
     }
     if (bad) errs.push('分攤金額需為非負數');
     else if (!anyPos) errs.push('至少一人分攤金額需大於 0');
-    else if (Math.round(sum) !== Math.round(amount)) errs.push('各人分攤金額加總需等於總額');
+    // 以該幣最小單位比對（dp=0 時等同舊版的整數比對；dp=2 時精確到分）
+    else if (Math.round(sum * curScale(split.currency)) !== Math.round(amount * curScale(split.currency)))
+      errs.push('各人分攤金額加總需等於總額');
   } else if (split.mode === 'shares') {
     const m = split.shares || {};
     let sum = 0;
@@ -1132,15 +1146,18 @@ function computeSettlement(members, splits, targetCur, rates) {
     if (s.mode === 'amount') {
       let sm = 0; const am = s.amounts || {};
       for (const id of Object.keys(am)) { if (memberIds.has(id)) { const v = Number(am[id]); if (Number.isFinite(v) && v >= 0) sm += v; } }
-      if (Math.round(sm) !== Math.round(Number(s.amount) || 0)) { skipped++; continue; }
+      const ssc = curScale(s.currency);
+      if (Math.round(sm * ssc) !== Math.round((Number(s.amount) || 0) * ssc)) { skipped++; continue; }
     }
     const shares = splitSharesNative(s);
     for (const id of Object.keys(shares)) { if (memberIds.has(id)) owed[id] += splitToCur(shares[id], s, targetCur, rates); }
-    paid[s.payerId] += splitToCur(Math.round(Number(s.amount) || 0), s, targetCur, rates);
+    paid[s.payerId] += splitToCur(roundCur(Number(s.amount) || 0, s.currency), s, targetCur, rates);
   }
+  // 淨額在「顯示幣別的最小單位」上做整數運算（dp=0 時倍率 1 ⇒ 與舊版位元級相同），最後再換回顯示單位
+  const sc = curScale(targetCur);
   const netInt = Object.create(null);
   let sum = 0;
-  for (const m of members) { netInt[m.id] = Math.round(paid[m.id] - owed[m.id]); sum += netInt[m.id]; }
+  for (const m of members) { netInt[m.id] = Math.round((paid[m.id] - owed[m.id]) * sc); sum += netInt[m.id]; }
   if (sum !== 0) {
     let target = null;
     for (const id of Object.keys(netInt)) {
@@ -1166,6 +1183,10 @@ function computeSettlement(members, splits, targetCur, rates) {
     d.amt -= t; c.amt -= t;
     if (d.amt === 0) di++;
     if (c.amt === 0) ci++;
+  }
+  if (sc !== 1) {                       // 換回顯示單位（$0.01）
+    for (const id of Object.keys(netInt)) netInt[id] = netInt[id] / sc;
+    for (const t of transfers) t.amount = t.amount / sc;
   }
   return { netInt, transfers, skipped };
 }
@@ -1349,6 +1370,7 @@ function runSplitSelfTest() {
   return { pass, fail, fails };
 }
 
+let _storeCorrupt = false;         // 多帳本主檔曾解析失敗（readJSON 設定，loadStore 收尾時提醒使用者）
 let store = loadStore();           // 多帳本容器
 let data = activeLedger();         // 目前這本（App 其餘邏輯只認得 data）
 let filter = 'all';
@@ -1387,8 +1409,20 @@ function defaultStore() {
   const first = normalizeLedger(defaultData());
   return { ledgers: [first], activeLedgerId: first.id, _savedAt: 0 };
 }
+// 讀 JSON；**壞掉的內容不會被當成「沒有資料」靜默略過** —— 另存殘骸並記錄旗標，
+// 由 loadStore 決定是否進入保護模式（否則下一次 save 會把其餘帳本永久覆蓋）
+// 註：_storeCorrupt 宣告在最上方的全域區（loadStore() 在那之前就會被呼叫，宣告在此會踩 TDZ）
 function readJSON(key) {
-  try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+  let raw = null;
+  try { raw = localStorage.getItem(key); } catch (e) { return null; }
+  if (!raw) return null;
+  try { return JSON.parse(raw); }
+  catch (e) {
+    console.error('資料毀損，無法解析：' + key, e);
+    try { localStorage.setItem(key + '_corrupt_bak', raw.slice(0, 2000000)); } catch (e2) {}
+    if (key === STORE_KEY_V3) _storeCorrupt = true;
+    return null;
+  }
 }
 function loadStore() {
   try {
@@ -1410,7 +1444,7 @@ function loadStore() {
       const i = store.ledgers.findIndex(l => l.id === legacy.id);
       if (i >= 0) {
         const mirrored = normalizeLedger(legacy);
-        if (JSON.stringify(mirrored) !== JSON.stringify(store.ledgers[i])) {
+        if (ledgerFingerprint(mirrored) !== ledgerFingerprint(store.ledgers[i])) {   // 只比內容，不比存檔時間
           store.ledgers[i] = mirrored;
           store.activeLedgerId = mirrored.id;
         }
@@ -1421,6 +1455,10 @@ function loadStore() {
   } catch (e) {
     console.error('讀取失敗，使用預設值', e);
     return defaultStore();
+  } finally {
+    // 多帳本主檔毀損：殘骸已存 *_corrupt_bak，這裡一定要讓使用者知道
+    // （否則會靜默塌縮成單一帳本，下一次 save 就把其餘帳本永久覆蓋）
+    if (_storeCorrupt) setTimeout(() => toast('⚠️ 帳本主檔毀損，已備份殘骸並以可讀的資料繼續。請立即「匯出備份」，並確認帳本數量是否正確。'), 900);
   }
 }
 function activeLedger() { return store.ledgers.find(l => l.id === store.activeLedgerId) || store.ledgers[0]; }
@@ -1452,6 +1490,12 @@ function normalizeLedgerFields(d) {
 // 以磁碟版為底做聯集，再把「目前這本」（正在編輯的就是它）覆蓋回去。
 // 政策：不讓刪除跨分頁傳播 —— 寧可讓被刪的帳本在另一分頁復活（可再刪一次），
 // 也不能吃掉別分頁新記的帳（不可逆）。單分頁使用時 disk._savedAt === store._savedAt，完全不觸發。
+// 帳本內容指紋（排除 _savedAt 這種只反映「何時存」的欄位）
+function ledgerFingerprint(l) {
+  const c = Object.assign({}, l);
+  delete c._savedAt;
+  return JSON.stringify(c);
+}
 function reconcileWithDisk() {
   try {
     const disk = readJSON(STORE_KEY_V3);
@@ -1468,9 +1512,16 @@ function reconcileWithDisk() {
       if (ml.id === data.id) {
         // 正在編輯的這本：記憶體優先（使用者此刻看到的就是它）；
         // 若磁碟版更新且內容不同＝同一本被兩邊改過 → 把對方版本留成衝突備份，可事後救回
-        if (Number(dl._savedAt) > Number(ml._savedAt || 0) && JSON.stringify(dl) !== JSON.stringify(ml)) {
+        // 比對前剝掉 _savedAt：它本身就在 JSON 裡，不剝的話「磁碟較新」必然導致內容不等 → 誤報衝突
+        if (Number(dl._savedAt) > Number(ml._savedAt || 0) && ledgerFingerprint(dl) !== ledgerFingerprint(ml)) {
           conflict = true;
-          try { localStorage.setItem('jp_trip_ledger_conflict_bak', JSON.stringify(dl)); } catch (e) {}
+          try {
+            const prev = readJSON('jp_trip_ledger_conflict_bak');
+            const arr = Array.isArray(prev) ? prev : (prev ? [prev] : []);
+            arr.push(dl);
+            while (arr.length > 5) arr.shift();                 // 保留最近 5 份，連續衝突不會互相覆蓋
+            localStorage.setItem('jp_trip_ledger_conflict_bak', JSON.stringify(arr));
+          } catch (e) {}
         }
         merged.push(ml);                                       // 保持 data 的參照
       } else {
@@ -3023,6 +3074,11 @@ function submitForm(event) {
 
   if (editingId) {
     const idx = data.txns.findIndex(t => t.id === editingId);
+    if (idx < 0) {                      // 編輯中途換了資料集（匯入/切帳本）→ 這筆已不存在
+      cancelEdit();                     // 不可寫 data.txns[-1]：那會掛成普通屬性、序列化時整筆消失
+      toast('這筆記錄已不存在（可能已切換帳本或匯入新資料），修改未儲存');
+      return;
+    }
     preserveGid(data.txns[idx], txn);   // 拆分組員編輯後保留組關聯（整筆替換會丟欄位）
     txn.id = editingId; data.txns[idx] = txn;
     window._flashId = editingId;
@@ -3254,8 +3310,9 @@ async function updateRate() {
     }
     const okCurs = Object.keys(got);
     if (!okCurs.length) {
-      toast(map ? '台銀沒有這些幣別的現金匯率，請到「⚙️ 設定」手動輸入'
-                : '匯率更新失敗（台銀暫時連不上），可到「⚙️ 設定」手動輸入匯率'
+      // 括號必要：否則 skipped 後綴只會黏在 falsy 分支，而 skipped 只在 map 有值時才會非空 → 永遠印不出來
+      toast((map ? '台銀沒有這些幣別的現金匯率，請到「⚙️ 設定」手動輸入'
+                 : '匯率更新失敗（台銀暫時連不上），可到「⚙️ 設定」手動輸入匯率')
         + (skipped.length ? `（${skipped.join('、')} 取得值異常已略過）` : ''));
       return;
     }
@@ -3264,9 +3321,11 @@ async function updateRate() {
     data.rateUpdatedAt = nowStr();
     save(); render();
     if (document.getElementById('settings-modal').classList.contains('show')) renderRateEditor();
-    const miss = wanted.filter(c => okCurs.indexOf(c) < 0);
+    // 「無現金報價」與「取得值異常被擋下」要分開講，後者是 rateSane 唯一的觀測窗口
+    const miss = wanted.filter(c => okCurs.indexOf(c) < 0 && skipped.indexOf(curName(c)) < 0);
     toast('匯率已更新（台銀現金賣出）：' + okCurs.map(c => `${curName(c)} ${curSym(c)}${data.rates[c]}`).join('、') +
-      (miss.length ? `\n（${miss.map(curName).join('、')} 台銀無現金報價，請手動輸入）` : ''));
+      (miss.length ? `\n（${miss.map(curName).join('、')} 台銀無現金報價，請手動輸入）` : '') +
+      (skipped.length ? `\n（⚠️ ${skipped.join('、')} 取得值異常已略過，維持原匯率）` : ''));
   } finally {
     btn.disabled = false; btn.textContent = old;
   }
@@ -3320,6 +3379,55 @@ function renderLedgerModal() {
   const arch = store.ledgers.filter(l => l.archived);
   el.innerHTML = live.map(ledgerRowHTML).join('') +
     (arch.length ? `<div class="ledger-arch-head">🗄 已封存（${arch.length}）</div>` + arch.map(ledgerRowHTML).join('') : '');
+  renderLedgerBaks();
+}
+// 救援備份的還原入口（沒有入口的備份等於不存在）
+function conflictBaks() {
+  const v = readJSON('jp_trip_ledger_conflict_bak');
+  return Array.isArray(v) ? v : (v ? [v] : []);
+}
+function renderLedgerBaks() {
+  const box = document.getElementById('ledger-baks');
+  if (!box) return;
+  const del = readJSON('jp_trip_ledger_deleted_bak');
+  const cf = conflictBaks();
+  let html = '';
+  if (del && del.accounts) html += `<div class="ledger-bak-row">🗑 剛刪除：<b>${escapeHtml(del.ledgerName || '未命名')}</b>` +
+    `<button class="btn btn-sm" onclick="restoreDeletedLedger()">↩ 還原成新帳本</button></div>`;
+  if (cf.length) html += `<div class="ledger-bak-row">⚠️ 其他分頁的衝突版本 ${cf.length} 份` +
+    `<button class="btn btn-sm" onclick="restoreConflictBak()">↩ 還原最新一份</button>` +
+    `<button class="btn btn-sm btn-danger" onclick="clearConflictBaks()">清除</button></div>`;
+  box.innerHTML = html;
+  box.style.display = html ? '' : 'none';
+}
+function restoreDeletedLedger() {
+  const d = readJSON('jp_trip_ledger_deleted_bak');
+  if (!d || !d.accounts) { toast('沒有可還原的已刪除帳本'); return; }
+  const nl = normalizeLedger(d);
+  nl.id = genId(); nl.archived = false;                 // 以新帳本身分回來，不覆蓋任何現有帳本
+  store.ledgers.push(nl);
+  try { localStorage.removeItem('jp_trip_ledger_deleted_bak'); } catch (e) {}
+  switchLedger(nl.id, true);
+  save(); render(); renderLedgerModal();
+  toast(`已還原「${nl.ledgerName}」`);
+}
+function restoreConflictBak() {
+  const arr = conflictBaks();
+  if (!arr.length) { toast('沒有衝突備份'); return; }
+  const src = arr[arr.length - 1];
+  const nl = normalizeLedger(src);
+  nl.id = genId(); nl.archived = false;
+  nl.ledgerName = ((nl.ledgerName || '帳本') + '（衝突備份）').slice(0, 80);
+  store.ledgers.push(nl);
+  arr.pop();
+  try { localStorage.setItem('jp_trip_ledger_conflict_bak', JSON.stringify(arr)); } catch (e) {}
+  switchLedger(nl.id, true);
+  save(); render(); renderLedgerModal();
+  toast(`已還原成「${nl.ledgerName}」，請自行比對後刪除多餘的那本`);
+}
+function clearConflictBaks() {
+  try { localStorage.removeItem('jp_trip_ledger_conflict_bak'); } catch (e) {}
+  renderLedgerBaks(); toast('已清除衝突備份');
 }
 function toggleLedgerAdd(show) {
   const box = document.getElementById('ledger-add');
@@ -3342,6 +3450,8 @@ function renameLedger(id, name) {
 }
 // 換帳本＝換資料集：暫態一律清空（沿用匯入/還原的同一條紀律）
 function resetTransientState() {
+  clearSplitUndo();      // 換資料集前清分帳 undo 緩衝，杜絕跨帳本注入
+  exitSelectMode();      // 先跑：內部要靠 editingGid 判斷是否 cancelGroupEdit()，清空前呼叫才有效
   filter = 'all'; dateFilter = 'all'; sortMode = 'date_desc'; chartMode = 'cat';
   editingId = null; editingGid = null; groupEditIds = []; toamtTouched = false;
   entryMode = 'single'; multiRows = []; splitRows = [];
@@ -3349,9 +3459,8 @@ function resetTransientState() {
   splitTax = { mode: 'none', rate: 8 }; singleTax = { mode: 'none', rate: 8 };
   settleCur = HOME_CUR; splitEditingId = null; _drillCtx = null; _gidCountCache = null;
   _inlineEditId = null;  // 行內編輯指向上一本的 txn id，一併清掉
+  _lgPendingDel = null;  // 帳本刪除的「武裝中」狀態不得跨資料集殘留
   _summaryExpandedCats.clear(); _summaryExpandedPays.clear();
-  clearSplitUndo();      // 換資料集前清分帳 undo 緩衝，杜絕跨帳本注入
-  exitSelectMode();      // 清 selectedIds / 退出選取模式
   pruneExpandedGids();   // 展開中的拆分組是全域 key，修剪掉不屬於這本的殘留
 }
 function switchLedger(id, quiet) {
@@ -3407,6 +3516,8 @@ function askDeleteLedger(id) {
 }
 function cancelDeleteLedger() { _lgPendingDel = null; renderLedgerModal(); }
 function confirmDeleteLedger(id) {
+  // 必須與「目前武裝中的那一本」一致：清單重排後紅色按鈕會換位置，沒這道檢查就可能誤刪別本
+  if (id !== _lgPendingDel) { _lgPendingDel = null; renderLedgerModal(); toast('刪除已取消（清單有變動，請重新確認）'); return; }
   const i = store.ledgers.findIndex(x => x.id === id);
   if (i < 0 || store.ledgers.length <= 1) { _lgPendingDel = null; renderLedgerModal(); return; }
   const name = store.ledgers[i].ledgerName;
@@ -3430,6 +3541,9 @@ document.getElementById('ledger-modal').addEventListener('click', e => { if (e.t
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('ledger-modal').classList.contains('show')) closeLedgerModal(); });
 
 /* ===================== 設定 ===================== */
+// 設定 modal 直接編輯 live data（移除帳戶、改幣別、改匯率…），若未按「儲存」就關閉，
+// 這些變更會殘留在記憶體、被下一次任何 save() 落盤 → 開啟時快照，非提交式關閉時還原。
+let _settingsSnap = null;
 function openSettings() {
   document.getElementById('s-ledger-name').value = data.ledgerName || '';
   renderRateEditor();
@@ -3437,9 +3551,24 @@ function openSettings() {
   renderAcctEditor();
   document.getElementById('s-split-enabled').checked = splitEnabled();
   document.getElementById('s-hide-rate').checked = hideRate();
+  _settingsSnap = JSON.stringify({
+    ledgerName: data.ledgerName, accounts: data.accounts, categories: data.categories, rates: data.rates
+  });
   document.getElementById('settings-modal').classList.add('show');
 }
-function closeSettings() { document.getElementById('settings-modal').classList.remove('show'); }
+// committed=true（由儲存/匯入/還原/清除呼叫）→ 保留變更；否則還原快照，避免「改了沒存卻生效」
+function closeSettings(committed) {
+  if (!committed && _settingsSnap) {
+    try {
+      const s = JSON.parse(_settingsSnap);
+      data.ledgerName = s.ledgerName; data.accounts = s.accounts;
+      data.categories = s.categories; data.rates = s.rates;
+      refreshSelects(); render();
+    } catch (e) {}
+  }
+  _settingsSnap = null;
+  document.getElementById('settings-modal').classList.remove('show');
+}
 
 /* —— 設定：多幣別匯率表 —— */
 // 每列兩個輸入互為倒數（1 台幣 = X 外幣 ⟷ 1 外幣 = Y 台幣），改一邊自動算另一邊
@@ -3501,6 +3630,8 @@ function addRateRow() {
 }
 function removeRateRow(c) {
   if (foreignCursInUse().indexOf(c) >= 0) { toast('有帳戶正在使用這個幣別，請先改掉帳戶幣別'); return; }
+  // 分帳筆也可能用到該幣別（結算選單會保留它）；匯率被刪掉會讓換算靜默退回 1:1
+  if ((data.splits || []).some(s => s.currency === c)) { toast('有分帳費用使用這個幣別，移除匯率會讓結算失準'); return; }
   const cur = readRateEditor() || Object.assign({}, data.rates);
   delete cur[c];
   data.rates = cur;
@@ -3600,7 +3731,7 @@ function saveSettings() {
   save(); refreshSelects(); render();
   if (entryMode === 'multi') renderMultiRows();                                  // 帳戶/分類變更同步多列下拉
   const feeOnEl = document.getElementById('f-fee-on'); if (feeOnEl && feeOnEl.checked) refreshFeeSelects();
-  closeSettings();
+  closeSettings(true);          // 提交式關閉：保留這次的設定變更
   toast('設定已儲存 ✅');
 }
 
@@ -3691,7 +3822,7 @@ function importJSON(e) {
           nl.id = genId(); nl.createdAt = today(); nl.archived = false;
           store.ledgers.push(nl);
           switchLedger(nl.id, true);
-          save(); refreshSelects(); render(); closeSettings();
+          save(); refreshSelects(); render(); closeSettings(true);
           toast(`已匯入成新帳本「${nl.ledgerName}」✅`);
           return;
         }
@@ -3699,9 +3830,8 @@ function importJSON(e) {
         catch (err) { toast('⚠️ 自動備份失敗（可能空間不足），已取消覆蓋。建議先手動「匯出備份」。'); return false; }
         replaceActiveLedger(sanitizeImport(d));
         if (!data.categories) data.categories = defaultData().categories;
-        clearSplitUndo(); // N1-a：換資料集前清分帳 undo 緩衝，杜絕舊 split 注入新帳本
-        exitSelectMode(); // 換資料集前退出選取模式，清過期 selectedIds
-        save(); refreshSelects(); render(); closeSettings();
+        resetTransientState();   // 換資料集＝與切帳本同一條紀律（含 undo 緩衝、選取、行內編輯、群組編輯）
+        save(); refreshSelects(); render(); closeSettings(true);
         toast('匯入成功 ✅（如需復原請到 設定 → 還原上次自動備份）');
       }, '匯入');
     } catch (err) { toast('匯入失敗：' + err.message); }
@@ -3718,11 +3848,10 @@ function restoreAutobak() {
   if (!confirm('還原會用「上次匯入前的自動備份」覆蓋目前資料。\n（目前資料會被存成新的自動備份，可再按一次還原切回。）\n確定還原？')) return;
   const cur = JSON.stringify(data); // 還原前先留存目前資料，讓還原可逆
   replaceActiveLedger(sanitizeImport(d));
-  clearSplitUndo(); // N1-a：還原前清分帳 undo 緩衝
-  exitSelectMode(); // 換資料集前退出選取模式，清過期 selectedIds
+  resetTransientState();   // 換資料集＝與切帳本同一條紀律
   if (!data.categories) data.categories = defaultData().categories;
   try { localStorage.setItem('jp_trip_ledger_v2_autobak', cur); } catch (e) {}
-  save(); refreshSelects(); render(); closeSettings();
+  save(); refreshSelects(); render(); closeSettings(true);
   toast('已還原上次自動備份 ✅');
 }
 function exportCSV() {
@@ -3746,7 +3875,7 @@ function clearAll() {
   if (!confirm(`⚠️ 這會清除「${nm}」的所有記錄與設定，回到初始狀態（其他帳本不受影響）。建議先匯出備份。確定清除？`)) return;
   if (!confirm('再次確認：真的要清除這本帳本的全部內容嗎？')) return;
   replaceActiveLedger(defaultData());
-  resetTransientState(); save(); refreshSelects(); render(); closeSettings();
+  resetTransientState(); save(); refreshSelects(); render(); closeSettings(true);
 }
 
 /* ===================== 工具 ===================== */
@@ -3863,10 +3992,8 @@ function memberName(id) {
   const m = data.members.find(x => x.id === id);
   return m ? m.name : '（已刪成員）';
 }
-// 把結算整數依顯示幣別呈現（結算用：外幣以目前匯率回估）
-function fmtCur(amt, cur) {
-  return curSym(cur) + Math.round(amt).toLocaleString('en-US');
-}
+// 把結算金額依顯示幣別呈現（結算用：外幣以目前匯率回估；dp=2 幣別顯示到分）
+function fmtCur(amt, cur) { return fmt(amt, cur); }
 
 /* —— 收合 —— */
 function toggleSplit() {
@@ -3993,8 +4120,7 @@ function sharesLineHTML(s) {
   const sh = splitSharesNative(s);
   const ids = Object.keys(sh);
   if (ids.length === 0) return '';
-  const sym = curSym(s.currency);
-  return ids.map(id => `${escapeHtml(memberName(id))} ${sym}${Math.round(sh[id]).toLocaleString('en-US')}`).join('　');
+  return ids.map(id => `${escapeHtml(memberName(id))} ${fmt(sh[id], s.currency)}`).join('　');
 }
 function renderSplitList() {
   const el = document.getElementById('split-list');
@@ -4006,8 +4132,7 @@ function renderSplitList() {
   }
   const list = [...data.splits].sort((a, b) => (a.date < b.date ? 1 : (a.date > b.date ? -1 : 0)));
   el.innerHTML = undoBar + list.map(s => {
-    const sym = curSym(s.currency);
-    const amt = Math.round(Number(s.amount) || 0);
+    const amt = roundCur(Number(s.amount) || 0, s.currency);
     const twd = Math.round(splitToTWD(amt, s));
     const tags = [];
     if (s._needsReview) tags.push('<span class="review-tag">需檢查</span>');
@@ -4021,7 +4146,7 @@ function renderSplitList() {
           (s.note ? '<span>·</span><span>' + escapeHtml(s.note) + '</span>' : '') + `</div>` +
         (sl ? `<div class="shares-line">${sl}</div>` : '') +
       `</div>` +
-      `<div class="amt"><div class="v">${sym}${amt.toLocaleString('en-US')}</div>` +
+      `<div class="amt"><div class="v">${fmt(amt, s.currency)}</div>` +
         (s.currency !== HOME_CUR ? `<div class="twd">≒NT$${twd.toLocaleString('en-US')}</div>` : '') + `</div>` +
       `<div class="ops">` +
         `<button class="btn btn-sm" onclick="editSplit('${s.id}')">✎</button>` +
@@ -4204,21 +4329,20 @@ function updateSplitBalance() {
   const bal = document.getElementById('sp-balance');
   if (!bal) return;
   const mode = getSpMode();
-  const amount = Math.round(Number(document.getElementById('sp-amount').value) || 0);
   const cur = spCurValue();
-  const sym = curSym(cur);
+  const amount = roundCur(Number(document.getElementById('sp-amount').value) || 0, cur);  // dp=2 幣別保留分位
   // 每人即時預覽
   const sh = (amount > 0) ? splitSharesNative(buildDraftSplit()) : Object.create(null);
   data.members.forEach(m => {
     const pp = document.getElementById('pp-' + m.id);
-    if (pp) pp.textContent = (m.id in sh) ? (sym + Math.round(sh[m.id]).toLocaleString('en-US')) : '';
+    if (pp) pp.textContent = (m.id in sh) ? fmt(sh[m.id], cur) : '';
   });
   if (mode === 'amount') {
     let sum = 0; for (const k of Object.keys(_spDraft.amounts)) { const v = Number(_spDraft.amounts[k]); if (Number.isFinite(v) && v > 0) sum += v; }
-    const diff = Math.round(amount - sum);
+    const diff = roundCur(amount - sum, cur);          // 依幣別最小單位比對（dp=2 幣別可差到分）
     if (!amount) { bal.className = 'split-balance'; bal.textContent = ''; }
-    else if (diff === 0) { bal.className = 'split-balance ok'; bal.textContent = `✓ 已分配 ${sym}${Math.round(sum).toLocaleString('en-US')}，與總額相符`; }
-    else { bal.className = 'split-balance bad'; bal.textContent = diff > 0 ? `還差 ${sym}${diff.toLocaleString('en-US')} 未分配` : `超出 ${sym}${(-diff).toLocaleString('en-US')}`; }
+    else if (diff === 0) { bal.className = 'split-balance ok'; bal.textContent = `✓ 已分配 ${fmt(sum, cur)}，與總額相符`; }
+    else { bal.className = 'split-balance bad'; bal.textContent = diff > 0 ? `還差 ${fmt(diff, cur)} 未分配` : `超出 ${fmt(-diff, cur)}`; }
   } else if (mode === 'shares') {
     let sum = 0; for (const k of Object.keys(_spDraft.shares)) { const v = Number(_spDraft.shares[k]); if (Number.isFinite(v) && v > 0) sum += v; }
     bal.className = sum > 0 ? 'split-balance ok' : 'split-balance bad';
@@ -4774,7 +4898,8 @@ function batchSetAccount() {
       if (!selectedIds.has(t.id) || t.type !== 'expense') continue;
       const oa = acctById(t.account); const oldCur = oa ? oa.currency : 'JPY';
       let v = convertAmountOnAccountChange(t.amount, oldCur, na.currency, data.rates, mode);
-      if (mode === 'convert' && oldCur !== na.currency) v = Math.round(v);
+      // 依目標幣別的最小單位取整（dp=0 → 整數，同舊行為；dp=2 → 到分，避免 ¥50 換成 $0 把資料抹平）
+      if (mode === 'convert' && oldCur !== na.currency) v = roundCur(v, na.currency);
       t.amount = v; t.account = newId; n++;
     }
     save(); render(); renderBatchBar(); toast(`已改 ${n} 筆帳戶`);
@@ -5207,6 +5332,39 @@ function runCurrencySelfTest() {
   ok(empty.count === 0 && empty.range === '尚無消費', 'ledgerStat：空帳本不炸');
   const single = ledgerStat({ txns: [{ type: 'expense', date: '2026-07-09' }], accounts: [] });
   ok(single.range === '2026-07-09', 'ledgerStat：單日不重複顯示');
+  ok(ledgerFingerprint({ id: 'a', x: 1, _savedAt: 1 }) === ledgerFingerprint({ id: 'a', x: 1, _savedAt: 999 }),
+     'ledgerFingerprint：忽略 _savedAt（避免只是存檔時間不同就誤判為衝突）');
+  ok(ledgerFingerprint({ id: 'a', x: 1 }) !== ledgerFingerprint({ id: 'a', x: 2 }), 'ledgerFingerprint：內容不同即不同');
+
+  // ⑦ 幣別最小單位（dp=0 與舊版位元相同；dp=2 精確到分）
+  ok(curScale('JPY') === 1 && curScale('TWD') === 1 && curScale('USD') === 100, 'curScale：dp=0→1、dp=2→100');
+  ok(roundCur(12.345, 'USD') === 12.35 && roundCur(12.4, 'JPY') === 12, 'roundCur：依幣別最小單位取整');
+  // 均分：美金 12.50 兩人 → 6.25/6.25（舊版整數化會變 7/6）
+  let sp = { amount: 12.5, currency: 'USD', mode: 'equal', participants: ['a', 'b'] };
+  let sh2 = splitSharesNative(sp);
+  ok(sh2.a === 6.25 && sh2.b === 6.25, 'splitSharesNative：USD 12.50 均分＝6.25/6.25');
+  // 小額不再整筆蒸發：0.40 兩人 → 0.20/0.20
+  sh2 = splitSharesNative({ amount: 0.4, currency: 'USD', mode: 'equal', participants: ['a', 'b'] });
+  ok(sh2.a === 0.2 && sh2.b === 0.2, 'splitSharesNative：USD 0.40 不再整筆消失');
+  // 除不盡：0.10 三人 → 0.04/0.03/0.03，Σ=0.10
+  sh2 = splitSharesNative({ amount: 0.1, currency: 'USD', mode: 'equal', participants: ['a', 'b', 'c'] });
+  ok(Math.round((sh2.a + sh2.b + sh2.c) * 100) === 10, 'splitSharesNative：USD 除不盡仍 Σ=總額');
+  // 日圓維持整數（零回歸）
+  sh2 = splitSharesNative({ amount: 100, currency: 'JPY', mode: 'equal', participants: ['a', 'b', 'c'] });
+  ok(sh2.a === 34 && sh2.b === 33 && sh2.c === 33, 'splitSharesNative：JPY 仍為整數 34/33/33（零回歸）');
+  // 分位金額模式：驗證閘不再把 6.25+6.25 判為不等於 12.50
+  ok(validateSplit({ amount: 12.5, currency: 'USD', mode: 'amount', amounts: { a: 6.25, b: 6.25 }, payerId: 'a' },
+     new Set(['a', 'b'])).length === 0, 'validateSplit：USD 分位加總相符即通過');
+  // 結算域為 dp=2 幣別：淨額與轉帳保留分位且守恆
+  const MU = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }];
+  const SU = [{ id: 's', amount: 12.5, currency: 'USD', rate: 0.03125, mode: 'equal', participants: ['a', 'b'], payerId: 'a' }];
+  const RU = computeSettlement(MU, SU, 'USD', { USD: 0.03125 });
+  ok(RU.netInt.a === 6.25 && RU.netInt.b === -6.25, 'computeSettlement：USD 域淨額保留分位');
+  ok(RU.transfers.length === 1 && RU.transfers[0].amount === 6.25, 'computeSettlement：USD 域轉帳 $6.25');
+  ok(near(RU.netInt.a + RU.netInt.b, 0), 'computeSettlement：USD 域守恆');
+  // 批量改帳戶換算：日圓→美金不再被整數化成 0
+  ok(roundCur(convertAmountOnAccountChange(50, 'JPY', 'USD', { JPY: 5, USD: 0.03125 }, 'convert'), 'USD') === 0.31,
+     'convertAmountOnAccountChange：¥50→$0.31（不再被抹成 0）');
 
   return { pass, fail, fails };
 }
