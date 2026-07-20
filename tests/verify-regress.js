@@ -41,6 +41,8 @@ const PLAN = {
   R11: 4, R12: 3, R13: 2,
   // 第六輪（合計 30）
   R14: 4, R15: 4, R16: 4, R17: 4, R18: 2, R19: 2, R20: 3, R21: 6, R22: 1,
+  // 第七輪（合計 14）
+  R23: 5, R24: 5, R25: 4,
 };
 const RAN = {};
 function _reconcile(name, want, p0, f0, threw) {
@@ -624,6 +626,93 @@ scenario('R22', () => {
   });
   eq(w.eval('JSON.stringify(getExpandedGids())'), JSON.stringify(['ok1']),
     'R22-a ★ getExpandedGids 有元素白名單（與 getExpandedDays 對稱，註解本來就這樣宣稱）');
+});
+
+/* ===== 第七輪外部審查（Claude Code，標的 e23d7b7）指出「第六輪修復本身引入」的新缺陷 =====
+   R23 正規化用 genId() 產生替代 id → 非決定性 → ledgerFingerprint 不等 → 多分頁誤報衝突、
+       假備份把真備份擠出 5 格環（＝第五輪 R13 失效模式的降級復發）（Medium）
+   R24 表單層 Enter 防護只涵蓋 INPUT，<select>（拆分列「大項」是必經欄位）仍會觸發隱式送出（High）
+   R25 IME 只看 isComposing/229，涵蓋不到「compositionend 先發、keydown 帶 isComposing:false」的
+       Safari 型時序；另 reconcileGroupTitles 取「第一個」依賴陣列順序（Medium） */
+
+const mkL7 = (id, txns, savedAt) => Object.assign(mk({ txns }), { id, ledgerName: 'R7', archived: false, _savedAt: savedAt });
+
+scenario('R23', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mk()) });
+  // ① 同一份輸入正規化兩次必須完全相同（含非法 id 的情形）
+  const det = (rawTxns) => w.eval(`(function(){
+    var raw = ${JSON.stringify(JSON.stringify(mkL7('LA', [], 1000)))};
+    var o = JSON.parse(raw); o.txns = ${JSON.stringify(JSON.stringify([]))} && JSON.parse(${JSON.stringify(JSON.stringify(rawTxns))});
+    var a = normalizeLedger(JSON.parse(JSON.stringify(o))), b = normalizeLedger(JSON.parse(JSON.stringify(o)));
+    return JSON.stringify({ids:a.txns.map(function(t){return t.id;}), fpEq: ledgerFingerprint(a)===ledgerFingerprint(b)});
+  })()`);
+  const legal = JSON.parse(det([{ id: 'good1', type: 'expense', date: '2026-07-01', account: 'jpy', amount: 1, cat: '飲食', item: 'x' }]));
+  ok(legal.fpEq, 'R23-a 全合法 id：兩次正規化的指紋相同（對照組）');
+  const illegal = JSON.parse(det([
+    { id: 'bad!!id', type: 'expense', date: '2026-07-01', account: 'jpy', amount: 1, cat: '飲食', item: 'x' },
+    { id: 'good2', type: 'expense', date: '2026-07-01', account: 'jpy', amount: 2, cat: '飲食', item: 'y' }]));
+  ok(illegal.fpEq, 'R23-b ★★ 含非法 id：兩次正規化的指紋仍相同（替代 id 必須決定性，不可用 genId）');
+  ok(/^[a-z0-9]{1,32}$/i.test(illegal.ids[0]), 'R23-c 替代 id 仍符合白名單格式');
+  // ② 內容沒變、只有 _savedAt 較新 → 不得誤判成多分頁衝突、不得推假備份
+  const st = { activeLedgerId: 'LA', _savedAt: 1000, ledgers: [mkL7('LA', [
+    { id: 'bad!!id', type: 'expense', date: '2026-07-01', account: 'jpy', amount: 1, cat: '飲食', item: 'x' },
+    { id: 'good2', type: 'expense', date: '2026-07-01', account: 'jpy', amount: 2, cat: '飲食', item: 'y' }], 1000)] };
+  const b2 = boot({ jp_trip_ledger_v3: JSON.stringify(st) });
+  const r = JSON.parse(b2.w.eval(`(function(){
+    var out=[];
+    for (var i=0;i<3;i++){
+      var disk = {activeLedgerId:'LA', _savedAt:5000+1000*i, ledgers:[JSON.parse(JSON.stringify(store.ledgers[0]))]};
+      disk.ledgers[0].txns[0].id = 'bad!!id';        // 磁碟仍是升級前的舊資料
+      disk.ledgers[0]._savedAt = 5000+1000*i;
+      localStorage.setItem('jp_trip_ledger_v3', JSON.stringify(disk));
+      store._savedAt = 4000; data._savedAt = 4000; store.ledgers[0]._savedAt = 4000;
+      out.push(reconcileWithDisk());
+    }
+    return JSON.stringify({out: out, bak: (JSON.parse(localStorage.getItem('jp_trip_ledger_conflict_bak')||'[]')).length});
+  })()`));
+  ok(r.out.every(x => x !== 'conflict'), 'R23-d ★★ 內容未變只有 _savedAt 較新 → 不誤報多分頁衝突');
+  eq(r.bak, 0, 'R23-e ★★ 不推入假的衝突備份（否則會把真備份擠出 5 格環）');
+});
+
+scenario('R24', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mk()) });
+  w.eval(`document.getElementById('f-split-on').checked=true; onSplitToggle();
+          splitRows=[{cat:'飲食',subcat:'晚餐',item:'x',amount:'1'}]; renderSplitRows();`);
+  const fire = (sel) => w.eval(`(function(){var el=${sel};if(!el)return null;el.focus();
+    var ev=new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});
+    el.dispatchEvent(ev);return ev.defaultPrevented;})()`);
+  ok(fire(`document.querySelector('#split-rows select')`) === true,
+    'R24-a ★★ 拆分列「大項」<select> 的 Enter 被擋（每一列必經欄位，用 INPUT 白名單會漏）');
+  ok(fire("document.getElementById('f-account')") === true, 'R24-b ★★ 支付帳戶 <select> 的 Enter 被擋');
+  ok(fire("document.getElementById('f-cat')") === true, 'R24-c ★ 大項 <select> 的 Enter 被擋');
+  ok(fire("document.getElementById('f-split-title')") === true, 'R24-d 既有 INPUT 防護未回歸');
+  w.eval("document.getElementById('f-split-on').checked=false; onSplitToggle();");
+  ok(fire("document.getElementById('f-cat')") === false, 'R24-e ★ 單筆模式不攔截（原行為不變）');
+});
+
+scenario('R25', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mk()) });
+  w.eval(`document.getElementById('f-split-on').checked=true; onSplitToggle();
+          splitRows=[{cat:'飲食',subcat:'晚餐',item:'',amount:''}]; renderSplitRows();`);
+  const r = JSON.parse(w.eval(`(function(){
+    var item = document.querySelector('#split-rows input[data-fld="item"]');
+    item.focus();
+    item.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+    item.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'ラーメン'}));
+    var ev = new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});
+    item.dispatchEvent(ev);
+    return JSON.stringify({prevented: ev.defaultPrevented,
+      focus: (document.activeElement.getAttribute('data-fld')||document.activeElement.id)});
+  })()`));
+  eq(r.focus, 'item', 'R25-a ★★ compositionend 後的 Enter（Safari 型時序）不搬游標');
+  ok(r.prevented === false, 'R25-b ★ 該 Enter 原樣放行（交給 IME 確認候選字）');
+  // 組標題選法與陣列順序無關
+  const ord = (arr) => w.eval(`JSON.stringify(reconcileGroupTitles(${JSON.stringify(arr)}.map(function(x,i){
+    return {gid:'go', gtitle:x, id:'o'+i};})).map(function(t){return t.gtitle;}))`);
+  eq(ord(['早餐', '午餐', '午餐']), ord(['午餐', '午餐', '早餐']),
+    'R25-c ★★ reconcileGroupTitles 與輸入順序無關（手動排序會改變 data.txns 實際順序）');
+  // 用 ASCII 讓「字典序最小」不依賴對 CJK 碼位順序的直覺（乙 U+4E59 < 甲 U+7532，容易反直覺）
+  eq(ord(['B', 'A']), JSON.stringify(['A', 'A']), 'R25-d ★ 平手時取字典序最小（決定性）');
 });
 
 // 總數不變式：期望總數由 PLAN 自動加總（不再有第二個需人工同步的魔數）。

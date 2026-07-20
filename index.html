@@ -1590,14 +1590,26 @@ function normalizeLedgerFields(d) {
     //      t.date → 「全部展開／收合」鈕的 onclick（3112；該處另已改為事件委派，這裡是根因防線）
     //    舊版匯入的惡意備份留在 localStorage，新版載入時就會變成儲存型 XSS（已實測可執行任意 JS）。
     //    ⚠️ 同樣不可用 Object.assign（惡意「自有」__proto__ 鍵會觸發原型替換），用明確跳過的手動複製。
+    // ⚠️ 替代 id 必須是「決定性」的，不能用 genId()（隨機）：這個函式每次載入／每次 reconcileWithDisk
+    //    都會跑一遍，隨機值會讓「同一份輸入的兩次正規化」產生不同 id ⇒ ledgerFingerprint 不等 ⇒
+    //    reconcileWithDisk(1655) 誤判成多分頁衝突、每次 save 都推一份假備份，把真正的併發衝突備份
+    //    擠出 5 格環（＝第五輪 R13 修過的失效模式又回來）。已實測：非法 id 的舊資料在磁碟上時，
+    //    隨機版連續 3 次全部誤報、假備份累積 3 份；舊版 0 次。改成由原值推導 + 索引 + 遞增計數器。
+    //    ⚠️ txn id 的持久化外部參照只有 jp_summary_hidden_items(2151，設計上即容忍過期 id)；
+    //    splits 只參照 member id、手動排序靠陣列順序，故 id 重發不會破壞它們。
     const _seenTxnId = new Set();
+    const _fallbackId = (raw, i, k) => {
+      const base = String(raw == null ? '' : raw).replace(/[^a-z0-9]/gi, '').slice(0, 16);
+      return ('n' + i + (k ? 'd' + k : '') + (base || 'x')).slice(0, 32);
+    };
     d.txns = (Array.isArray(d.txns) ? d.txns : [])
       .filter(t => t && typeof t === 'object')
-      .map(t => {
+      .map((t, i) => {
         const out = {};
         for (const k of Object.keys(t)) if (k !== '__proto__') out[k] = t[k];
-        let id = /^[a-z0-9]{1,32}$/i.test(t.id || '') ? t.id : genId();
-        while (_seenTxnId.has(id)) id = genId();   // 撞號重發：id 無跨物件參照，重發不影響其他資料
+        let id = /^[a-z0-9]{1,32}$/i.test(t.id || '') ? t.id : _fallbackId(t.id, i, 0);
+        let k = 0;
+        while (_seenTxnId.has(id)) id = _fallbackId(t.id, i, ++k);   // 撞號亦決定性
         _seenTxnId.add(id);
         out.id = id;
         out.type = (t.type === 'expense' || t.type === 'topup') ? t.type : 'expense';
@@ -1657,9 +1669,13 @@ function reconcileWithDisk() {
           try {
             const prev = readJSON('jp_trip_ledger_conflict_bak');
             const arr = Array.isArray(prev) ? prev : (prev ? [prev] : []);
-            arr.push(dl);
-            while (arr.length > 5) arr.shift();                 // 保留最近 5 份，連續衝突不會互相覆蓋
-            localStorage.setItem('jp_trip_ledger_conflict_bak', JSON.stringify(arr));
+            // 去重：與 loadStore(1533) 同一條紀律。連續且內容相同的衝突（例如正規化不穩、
+            // 或同一份磁碟版被反覆調解）不該把 5 格環洗成重複內容，那會把真正的併發衝突擠出去。
+            if (!arr.length || ledgerFingerprint(arr[arr.length - 1]) !== ledgerFingerprint(dl)) {
+              arr.push(dl);
+              while (arr.length > 5) arr.shift();               // 保留最近 5 份，連續衝突不會互相覆蓋
+              localStorage.setItem('jp_trip_ledger_conflict_bak', JSON.stringify(arr));
+            }
           } catch (e) {}
         }
         merged.push(ml);                                       // 保持 data 的參照
@@ -1883,12 +1899,24 @@ function titledItem(item, gtitle) {
 // 🏷️ 同組標題一致化：逐筆白名單擋得住「格式非法」，擋不住「同一個 gid 卻掛不同標題」的竄改資料
 //   （匯入／備份還原都可能送進來，畫面上會變成同一組三種標籤）。取組內第一個非空標題套給全組，
 //   整組都沒有就整組不留。匯入與載入共用這一份，避免兩條路徑各自實作而漂移。
+//   ⚠️ 選法必須「與陣列順序無關」：手動拖曳排序會改變 data.txns 的實際順序並存檔，
+//   若取「第一個非空」，同一份資料在不同排序歷史下會解出不同組標題（已實測）。
+//   改用：組內出現次數最多者 → 平手取字典序最小。同一組輸入無論順序，結果恆定。
 function reconcileGroupTitles(txns) {
-  const first = new Map();
-  for (const t of (txns || [])) if (t && t.gid && t.gtitle && !first.has(t.gid)) first.set(t.gid, t.gtitle);
+  const tally = new Map();                       // gid → Map(title → count)
+  for (const t of (txns || [])) {
+    if (!t || !t.gid || !t.gtitle) continue;
+    if (!tally.has(t.gid)) tally.set(t.gid, new Map());
+    const m = tally.get(t.gid);
+    m.set(t.gtitle, (m.get(t.gtitle) || 0) + 1);
+  }
+  const winner = new Map();
+  for (const [gid, m] of tally) {
+    winner.set(gid, [...m.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))[0][0]);
+  }
   for (const t of (txns || [])) {
     if (!t || !t.gid) continue;
-    const g = first.get(t.gid);
+    const g = winner.get(t.gid);
     if (g) t.gtitle = g; else delete t.gtitle;
   }
   return txns;
@@ -2633,7 +2661,7 @@ function renderAnalysisFilter() {
   for (const t of data.txns) if (t.type === 'expense') dcount[t.date] = (dcount[t.date] || 0) + 1;
   const dates = Object.keys(dcount).sort((a, b) => a < b ? 1 : -1);
   const wdChips = WD.map((w, i) => `<button class="date-chip ${f.weekdays.indexOf(i) >= 0 ? 'active' : ''}" onclick="toggleAnalysisWeekday(${i})">${w}</button>`).join('');
-  const dateChips = dates.map(d => `<button class="date-chip ${f.dates.indexOf(d) >= 0 ? 'active' : ''}" onclick="toggleAnalysisDate('${d}')">${fullDate(d)}<span class="c">${dcount[d]}</span></button>`).join('');
+  const dateChips = dates.map(d => `<button class="date-chip ${f.dates.indexOf(d) >= 0 ? 'active' : ''}" onclick="toggleAnalysisDate('${safeDateAttr(d)}')">${fullDate(d)}<span class="c">${dcount[d]}</span></button>`).join('');
   const o = analysisDimOptions();
   const acctName = id => { const a = acctById(id); return a ? a.name : id; };
   const moreOpen = isMoreFilterOpen();
@@ -3263,14 +3291,8 @@ function setDayExpanded(date, on) {
   try { localStorage.setItem('jp_expanded_days', JSON.stringify(a)); } catch (e) {}
 }
 function toggleDayExpanded(date) { setDayExpanded(date, !isDayExpanded(date)); renderTxns(); }
-// 只保留「目前這本確實存在」的日期（換帳本／刪光某天後修剪，避免這個全域 key 無限累積）
-function pruneExpandedDays() {
-  try {
-    const alive = new Set();
-    for (const t of (data.txns || [])) if (t.date) alive.add(t.date);
-    localStorage.setItem('jp_expanded_days', JSON.stringify(getExpandedDays().filter(d => alive.has(d))));
-  } catch (e) {}
-}
+// （原 pruneExpandedDays 已移除：換帳本改為整組清空 jp_expanded_days 後它就沒有呼叫點了，
+//   留著會讓人誤以為日期集合仍有「修剪」語意。拆分組那支 pruneExpandedGids 仍被 delGroup 使用。）
 // 全部展開／全部收合（作用於目前清單中出現的日期）
 function setAllDaysExpanded(dates, on) {
   try {
@@ -3583,7 +3605,7 @@ function renderDateStrip() {
   if (dirBtn) dirBtn.textContent = asc ? '舊→新' : '新→舊';
   let html = `<button class="date-chip ${dateFilter === 'all' ? 'active' : ''}" onclick="setDateFilter('all')">全部<span class="c">${base.length}</span></button>`;
   html += dates.map(d =>
-    `<button class="date-chip ${dateFilter === d ? 'active' : ''}" onclick="setDateFilter('${d}')">${fullDate(d)}<span class="c">${groups[d].length}</span></button>`
+    `<button class="date-chip ${dateFilter === d ? 'active' : ''}" onclick="setDateFilter('${safeDateAttr(d)}')">${fullDate(d)}<span class="c">${groups[d].length}</span></button>`
   ).join('');
   el.innerHTML = html;
 }
@@ -4304,6 +4326,10 @@ function fullDate(s) {
 function nowStr() { const d = new Date(); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// 要內插進 inline handler 之 JS 字串的日期，一律經這裡：不是 ISO 就回空字串。
+// 載入端已有 date 白名單當根因防線，這裡是 sink 端的對稱防護——三個 date sink（日期晶片、
+// 日期篩選列、原「全部展開」鈕）不能只有一處有結構性防護，否則白名單一鬆動就立刻變成活的注入點。
+function safeDateAttr(d) { return /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : ''; }
 function download(name, content, mime) {
   const blob = new Blob([content], { type: mime }); const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = name; a.click();
@@ -4977,7 +5003,15 @@ function focusSplitField(i, fld) {
 // ⌨️ IME 組字中的 Enter 是「確定候選字」不是動線指令。本 App 的品項幾乎必然經中/日文輸入法打字，
 //    不擋的話「ラーメン」按下確認鍵游標就跳走了。isComposing 是標準判準，keyCode 229 是舊版瀏覽器後備。
 //    組字中一律原樣放行（不 preventDefault）：瀏覽器在組字狀態下本來就不會觸發表單隱式送出。
-function isComposingKey(e) { return !!(e && (e.isComposing || e.keyCode === 229)); }
+//    ⚠️ 兩種 IME 時序都要涵蓋：(a) 組字中的 keydown 帶 isComposing / keyCode 229；
+//    (b) Safari 與部分 IME 是「compositionend 先發、隨後 keydown 帶 isComposing:false」——
+//    只看 (a) 的話，(b) 這條時序下確認候選字的 Enter 仍會被當成動線指令（已實測）。用時間窗涵蓋 (b)。
+let _lastCompEnd = 0;
+try { document.addEventListener('compositionend', () => { _lastCompEnd = Date.now(); }, true); } catch (e) {}
+function isComposingKey(e) {
+  if (e && (e.isComposing || e.keyCode === 229)) return true;
+  return (Date.now() - _lastCompEnd) < 50;
+}
 function onSplitKey(e, i, fld) {
   if (!e || e.key !== 'Enter' || isComposingKey(e)) return;
   e.preventDefault();          // 拆分列在 <form> 內，不擋會直接觸發送出
@@ -4993,7 +5027,11 @@ function onSplitKey(e, i, fld) {
 function onEntryFormKey(e) {
   if (!e || e.key !== 'Enter' || isComposingKey(e)) return;
   const el = e.target;
-  if (!el || el.tagName !== 'INPUT' || el.type === 'submit' || el.type === 'button') return;
+  // ⚠️ 用排除法而非 INPUT 白名單：<select> 的 Enter 一樣會觸發表單隱式送出，
+  //    而拆分列的「大項」正是每一列的必經欄位（用白名單等於把同一個洞原地重現）。
+  const tag = el && el.tagName;
+  if (!(tag === 'INPUT' || tag === 'SELECT')) return;
+  if (el.type === 'submit' || el.type === 'button') return;
   const on = document.getElementById('f-split-on');
   if (!on || !on.checked) return;                  // 只在拆分模式生效
   e.preventDefault();
@@ -5614,6 +5652,21 @@ function runGidGroupSelfTest() {
     'sanitizeImport：整組都沒有合法標題 → 整組不留（不會補出孤兒標題）');
   ok(reconcileGroupTitles([{ gid: 'z', gtitle: 'A' }, { gtitle: 'B' }]).map(t => t.gtitle).join(',') === 'A,B',
     'reconcileGroupTitles：沒有 gid 的那筆不被組一致化波及');
+  // 交叉情形：同一組內「合法 + 非字串 + 超長」——這正是把逐筆剝除與組一致化混在一起會互相掩蓋的組合，
+  // 必須有專屬斷言釘住，否則兩邊的測試都繞開它。
+  const sdx = sanitizeImport({ ledgerName: 't', rate: 5, accounts: [{ id: 'card', currency: 'JPY' }], txns: [
+    { id: 'x1', type: 'expense', amount: 1, date: '2026-07-04', gid: 'gx', gtitle: 'UNIQLO' },
+    { id: 'x2', type: 'expense', amount: 1, date: '2026-07-04', gid: 'gx', gtitle: { evil: 1 } },
+    { id: 'x3', type: 'expense', amount: 1, date: '2026-07-04', gid: 'gx', gtitle: 'あ'.repeat(60) }
+  ] });
+  ok(sdx.txns.every(t => t.gtitle === 'UNIQLO'),
+    'sanitizeImport：同組「合法+非字串+超長」→ 全組統一成那個合法標題');
+  // 組標題選法必須與陣列順序無關（手動拖曳會改變 data.txns 實際順序並存檔）
+  const ord = (arr) => reconcileGroupTitles(arr.map((x, i) => ({ gid: 'go', gtitle: x, id: 'o' + i }))).map(t => t.gtitle).join(',');
+  ok(ord(['早餐', '午餐', '午餐']) === ord(['午餐', '午餐', '早餐']),
+    'reconcileGroupTitles：結果與輸入順序無關（取最高頻，平手取字典序最小）');
+  // 用 ASCII：CJK 的碼位順序容易反直覺（乙 U+4E59 < 甲 U+7532），斷言不該依賴那個直覺
+  ok(ord(['B', 'A']) === 'A,A', 'reconcileGroupTitles：平手時取字典序最小（決定性）');
 
   // preserveGid：大標題與 gid 同進退（組員單筆編輯後不能掉標題）
   const kg = preserveGid({ gid: 'g9', gtitle: ' UNIQLO ' }, { type: 'expense' });
