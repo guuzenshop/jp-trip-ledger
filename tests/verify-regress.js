@@ -11,6 +11,12 @@
    R8 合法但危險的成員 id（constructor）分攤份數被丟棄（Low）
    R9 fetch 逾時不涵蓋 response body → 降級鏈失效、按鈕永久卡住（High）
    R10 fmt() 寫死 /100（Low，防未來 dp=3 幣別）
+
+   ---- 第五輪外部審查（Claude Code，標的 56f54e3）指出「上一輪修復本身引入」的新缺陷 ----
+   R11 normalizeLedgerFields 用 Object.assign 合併不受信任物件 → JSON.parse 產生的自有
+       __proto__ 鍵觸發原型替換（High，該帳戶物件本地污染，非全域）
+   R12 accounts 陣列含 null／缺 id 元素 → 補成「幽靈帳戶」流入下拉選單（Medium）
+   R13 WIP 修復重複開機時，conflict_bak 無去重地把真實併發衝突備份擠出（Medium）
 */
 const fs = require('fs');
 const http = require('http');
@@ -82,9 +88,12 @@ scenario('R1', () => {
     jp_trip_ledger_wip: '1',
   });
   ok(b2.w.eval("data.txns.some(t=>t.id==='NEWROW')"), 'R1-a 第一次載入：不採信過期鏡射，最後一筆還在');
-  eq(b2.w.eval("localStorage.getItem('jp_trip_ledger_wip')"), null, 'R1-b 修復完成後旗標才清除');
-  ok(b2.w.eval("(localStorage.getItem('jp_trip_ledger_v2')||'').indexOf('NEWROW') >= 0"),
-     'R1-c ★ 鏡射已被修回與主檔一致（沒有這一步，下次載入就會被舊鏡射覆蓋）');
+  // 「才」清除＝鏡射修復與旗標清除必須同時成立（合取），單獨查旗標=null 分不出順序
+  // （修復前的舊碼是「立刻」清旗標、鏡射根本沒修，同樣會得到 wip===null，測不出差異）
+  const mirrorFixed = b2.w.eval("(localStorage.getItem('jp_trip_ledger_v2')||'').indexOf('NEWROW') >= 0");
+  const flagCleared = b2.w.eval("localStorage.getItem('jp_trip_ledger_wip')") === null;
+  ok(mirrorFixed && flagCleared, 'R1-b ★ 鏡射已修回「且」旗標已清（合取；不是各自為政）');
+  ok(mirrorFixed, 'R1-c ★ 鏡射已被修回與主檔一致（沒有這一步，下次載入就會被舊鏡射覆蓋）');
   const bak = JSON.parse(b2.w.localStorage.getItem('jp_trip_ledger_conflict_bak') || '[]');
   ok(Array.isArray(bak) && bak.length === 1, 'R1-d 被棄用的過期鏡射存成衝突備份（可還原，不是直接丟掉）');
   ok(bak.length === 1 && !JSON.stringify(bak[0]).includes('NEWROW'), 'R1-e 備份內容確實是中斷前的舊版');
@@ -148,9 +157,15 @@ await scenario('R3', async () => {
   const updated = w.eval('data.rates.JPY');
   ok(updated !== before, `R3-a 前置：匯率已更新並落盤 ${before} → ${updated}`);
   w.eval('closeSettings()');            // 沒按儲存就關閉
+  const updatedAt = w.eval('data.rateUpdatedAt');
   eq(w.eval('data.rates.JPY'), updated, 'R3-b ★★ 已提交且已落盤的匯率不被還原');
-  eq(w.eval('data.rateSource'), '台銀現金賣出', 'R3-c 來源標記與數值一致');
-  ok(w.eval('data.rateUpdatedAt') !== null, 'R3-d 更新時間與數值一致（不再脫節）');
+  // 真正的「脫節」是「數值已更新，但中繼資料還停在舊的」——單獨查字串/非 null 測不出這種脫節
+  // （症狀版本 rateSource 一樣會是「台銀現金賣出」，只是 rates.JPY 被還原成舊值）。
+  // 交叉比對：rates.JPY===updated 的當下，rateSource/rateUpdatedAt 必須「同時」是更新後的狀態。
+  ok(w.eval('data.rates.JPY') === updated && w.eval('data.rateSource') === '台銀現金賣出',
+     'R3-c ★ 數值與來源同時處於「已更新」狀態（交叉比對，非各自為政）');
+  ok(w.eval('data.rates.JPY') === updated && w.eval('data.rateUpdatedAt') === updatedAt,
+     'R3-d ★ 數值與更新時間同時處於「已更新」狀態，時間戳未被單獨還原（不再脫節）');
   w.eval('save()');
   ok(w.localStorage.getItem('jp_trip_ledger_v3').indexOf(String(updated)) >= 0, 'R3-e 落盤的是新匯率');
 
@@ -185,6 +200,17 @@ scenario('R4', () => {
   w.eval('submitForm()');
   const last = JSON.parse(w.eval('JSON.stringify(data.txns[data.txns.length-1])'));
   eq(last.amount, 11.34, 'R4-g ★★ 寫入路徑：USD $10.50 外加 8% 存成 $11.34（原本存成 $11.5）');
+
+  // 拆分表單是「第 5 個呼叫端」（index.html:4748），走的是完全不同的送出函式 submitSplitForm，
+  // 前面的 R4-g 只覆蓋了單筆消費的送出路徑，兩者不共用程式碼，缺一不可各自守護
+  const before = w.eval('data.txns.length');
+  w.eval("splitRows = [{cat:Object.keys(data.categories)[0]||'', subcat:'', item:'咖啡', amount:10.50}];" +
+         "splitTax = { mode:'add', rate:8 };");
+  w.eval("submitSplitForm(today(), '')");
+  const added = w.eval('data.txns.length') - before;
+  const taxTxn = JSON.parse(w.eval("JSON.stringify(data.txns.find(t=>String(t.subcat||'').indexOf('消費稅')>=0))"));
+  ok(added >= 1, 'R4-h 前置：拆分表單送出有新增交易');
+  eq(taxTxn && taxTxn.amount, 0.84, 'R4-i ★★ 拆分寫入路徑（submitSplitForm）：USD $10.50 外加 8% 稅費列存成 $0.84（此路徑不經 R4-g 測到的程式碼）');
   w.close();
 });
 
@@ -197,9 +223,13 @@ scenario('R5', () => {
          "document.getElementById('f-to').value='usd';" +
          "document.getElementById('f-amount').value='985'; toamtTouched=false;");
   w.eval('updatePreview()');
-  eq(w.eval("document.getElementById('f-toamount').value"), '30.78', 'R5-a ★★ 預填 $30.78（原本填成 31）');
-  ok(String(w.eval("document.getElementById('amt-preview').textContent")).indexOf('30.78') >= 0,
-     'R5-b 預填值與同畫面提示一致，不再自相矛盾');
+  const inputVal = w.eval("document.getElementById('f-toamount').value");
+  const previewText = String(w.eval("document.getElementById('amt-preview').textContent"));
+  eq(inputVal, '30.78', 'R5-a ★★ 預填 $30.78（原本填成 31）');
+  // 交叉比對：從提示文字抽出的數字必須等於輸入框的值，不能只各自查對——
+  // 提示原本就是對的（bug 只出在輸入框），單獨查「提示含 30.78」測不出「兩者不一致」這件事本身。
+  const previewNum = (previewText.match(/[\d.]+/) || [])[0];
+  eq(previewNum, inputVal, 'R5-b ★ 預填值與同畫面提示的數字逐字相同（交叉比對，不是各自查對）');
   // dp=0 目標幣別維持整數
   w.eval("document.getElementById('f-to').value='jpy'; toamtTouched=false; updatePreview();");
   ok(String(w.eval("document.getElementById('f-toamount').value")).indexOf('.') < 0, 'R5-c dp=0 幣別仍為整數（零回歸）');
@@ -290,7 +320,10 @@ scenario('R8', () => {
 await scenario('R9', async () => {
   const m = html.match(/async function fetchTextWithTimeout\(url, ms\) \{[\s\S]*?\n\}/);
   ok(!!m, 'R9-a 抽得到出貨版 fetchTextWithTimeout 原始碼');
-  if (!m) return;
+  // 抽取失敗不能只 return——那會讓 R9-b/c/d 靜默不執行，總案數跟著縮水卻仍可能全綠
+  // （外部審查已指出：對缺這個函式的舊版跑本檔，只會拿到 1 個 FAIL，另外 3 個斷言直接消失）。
+  // 明確記成失敗，逼分數反映「這個高風險情境沒有守護」的事實。
+  if (!m) { fail += 3; fails.push('R9-b/c/d 未執行（抽不到 fetchTextWithTimeout 原始碼）'); return; }
   const fn = eval('(' + m[0].replace('async function fetchTextWithTimeout', 'async function') + ')');
   const server = http.createServer((req, res) => {
     if (req.url === '/stall-body') { res.writeHead(200, { 'Content-Type': 'text/csv' }); res.write('JPY,Buying,0.1897'); }
@@ -320,6 +353,81 @@ scenario('R10', () => {
   w.close();
 });
 
+/* ===== R11：normalizeLedgerFields 不得因合併不受信任物件而發生原型替換 ===== */
+scenario('R11', () => {
+  // JSON.parse 對 __proto__ 是一般的「自有」資料鍵（非字面量語法的特殊處理），
+  // Object.assign({}, a, {...}) 對它做 [[Set]] 會觸發 Object.prototype 的 __proto__ setter，
+  // 把合併後物件的原型整個換掉（該物件本地污染，非全域 Object.prototype 污染）。
+  const evilJson = '{"ledgerName":"X","rate":4.9261,"rates":{"JPY":4.9261},' +
+    '"accounts":[{"__proto__":{"kind":"credit","archived":true},"id":"jpy","name":"日幣","currency":"JPY","initial":1000,"color":"#888"}],' +
+    '"categories":{"飲食":["晚餐"]},"txns":[],"members":[],"splits":[],"schemaVersion":2}';
+  const { w } = boot({ jp_trip_ledger_v2: evilJson });
+  ok(w.eval('Object.getPrototypeOf(data.accounts[0]) === Object.prototype'),
+     'R11-a ★★ 帳戶物件原型未被惡意 __proto__ 鍵替換');
+  eq(w.eval('data.accounts[0].kind'), undefined, 'R11-b ★ 攻擊者控制的 kind 欄位沒有滲透進帳戶物件');
+  eq(w.eval('data.accounts[0].archived'), undefined, 'R11-c ★ 攻擊者控制的 archived 欄位沒有滲透進帳戶物件');
+  ok(w.eval("({}).polluted === undefined && Object.prototype.kind === undefined"),
+     'R11-d 對照：全域 Object.prototype 本就未受影響（確認測的是正確的攻擊面）');
+  w.close();
+});
+
+/* ===== R12：accounts 陣列的 null／缺 id 元素必須被過濾，不得補成幽靈帳戶 ===== */
+scenario('R12', () => {
+  const d = mk({ accounts: [
+    { id: 'twd', name: '台幣', currency: 'TWD', initial: 5000, color: '#888' },
+    null,
+    { currency: 'USD', initial: 100, color: '#888' },   // 缺 id
+  ] });
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(d) });
+  eq(w.eval('data.accounts.length'), 1, 'R12-a ★★ null／缺 id 的元素被過濾，只留下合法帳戶');
+  w.eval('refreshSelects()');
+  const values = JSON.parse(w.eval("JSON.stringify(Array.from(document.querySelectorAll('#f-account option')).map(o=>o.value))"));
+  ok(values.indexOf('undefined') < 0, 'R12-b ★★ 帳戶下拉選單不含 value="undefined" 的幽靈項');
+  eq(values.length, 1, 'R12-c 下拉選項數與合法帳戶數一致');
+  w.close();
+});
+
+/* ===== R13：WIP 修復重複觸發時，conflict_bak 不得無去重地把真實併發衝突備份擠出 ===== */
+scenario('R13', () => {
+  const b0 = boot({ jp_trip_ledger_v2: JSON.stringify(mk({ ledgerName: '過期鏡射' })) });
+  b0.w.eval('save()');
+  const v2Stale = b0.w.localStorage.getItem('jp_trip_ledger_v2');
+  b0.w.close();
+
+  const b1 = boot({ jp_trip_ledger_v2: v2Stale });
+  b1.w.eval("data.ledgerName = '主檔（較新）'; save();");
+  const v3Newer = b1.w.localStorage.getItem('jp_trip_ledger_v3');
+  b1.w.close();
+
+  const b2 = boot({ jp_trip_ledger_v2: JSON.stringify(mk({ ledgerName: 'PRECIOUS-CONFLICT' })) });
+  b2.w.eval('save()');
+  const precious = JSON.parse(b2.w.eval('JSON.stringify(data)'));
+  b2.w.close();
+
+  const storage = {
+    jp_trip_ledger_v3: v3Newer, jp_trip_ledger_v2: v2Stale, jp_trip_ledger_wip: '1',
+    jp_trip_ledger_conflict_bak: JSON.stringify([precious]),
+  };
+  for (let i = 0; i < 6; i++) {
+    const b = boot(storage);
+    storage.jp_trip_ledger_wip = '1';   // 模擬反覆中斷
+    storage.jp_trip_ledger_conflict_bak = b.w.localStorage.getItem('jp_trip_ledger_conflict_bak');
+    b.w.close();
+  }
+  const bak = JSON.parse(storage.jp_trip_ledger_conflict_bak || '[]');
+  ok(bak.some(l => l.ledgerName === 'PRECIOUS-CONFLICT'),
+     'R13-a ★★ 真實的併發衝突備份沒有被反覆中斷產生的重複鏡射擠出');
+  // 6 次重開機、鏡射內容從未變過 → 應該只在第一次推入一筆，之後全被去重擋下；
+  // 陣列最終應停在「預先塞的 1 筆 + 第一次推入的 1 筆」= 2，而非灌到上限 5。
+  eq(bak.length, 2, 'R13-b ★ 連續相同內容的過期鏡射只推入一次，之後被去重擋下（不會逐次灌入陣列）');
+});
+
+// 總數不變式：防止未來有人像 M-3 那樣讓某個案子「抽取失敗就靜默 return」，
+// 使總案數悄悄縮水卻仍然顯示全綠。這個數字每次新增/刪除斷言都要跟著更新。
+const executedTotal = pass + fail;
+if (executedTotal !== 65) {
+  fail++; fails.push(`案數不完整（防靜默掉案）：實際執行 ${executedTotal} 案，預期 65 案`);
+}
 console.log(`REGRESS: PASS ${pass} / FAIL ${fail}`);
 if (fails.length) { console.log('FAILS:\n - ' + fails.join('\n - ')); process.exit(1); }
 })();

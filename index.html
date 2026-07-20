@@ -1501,9 +1501,14 @@ function loadStore() {
           if (li < 0 || ledgerFingerprint(mirrored) !== ledgerFingerprint(store.ledgers[li])) {
             const prev = readJSON('jp_trip_ledger_conflict_bak');
             const arr = Array.isArray(prev) ? prev : (prev ? [prev] : []);
-            arr.push(mirrored);
-            while (arr.length > 5) arr.shift();
-            localStorage.setItem('jp_trip_ledger_conflict_bak', JSON.stringify(arr));
+            // 去重：同一份過期鏡射反覆中斷開機（例如環境每次都在寫入中被殺）不該把陣列洗成
+            // 5 份重複內容，那會把真正的多分頁併發衝突備份擠出去。只比對最後一筆，
+            // 與最新一筆不同才推入——足以擋住連續重複，且不影響原本「保留最近 5 份」的語意。
+            if (!arr.length || ledgerFingerprint(arr[arr.length - 1]) !== ledgerFingerprint(mirrored)) {
+              arr.push(mirrored);
+              while (arr.length > 5) arr.shift();
+              localStorage.setItem('jp_trip_ledger_conflict_bak', JSON.stringify(arr));
+            }
             rescued = true;
           }
         }
@@ -1538,11 +1543,20 @@ function normalizeLedgerFields(d) {
     // 帳戶白名單（冪等）：原本只在 sanitizeImport（匯入路徑）做，但 load／v2 鏡射救援／
     // 刪除備份還原／衝突備份還原都不經過它。account.currency 會經未逸出的 curSym() 進 innerHTML
     // （fmt() 內就有一處），舊版匯入的惡意備份檔可藉此變成儲存型 XSS。責任移到這裡，全路徑統一。
-    d.accounts = (Array.isArray(d.accounts) ? d.accounts : []).map(a => Object.assign({}, a, {
-      currency: isValidCur(a && a.currency) ? a.currency : 'JPY',
-      initial: Number(a && a.initial) || 0,
-      color: /^#[0-9a-f]{3,8}$/i.test((a && a.color) || '') ? a.color : '#888'
-    }));
+    // ⚠️ 不可用 Object.assign({}, a, {...})：a 來自 JSON.parse，若含惡意的「自有」__proto__ 鍵，
+    //    Object.assign 的 [[Set]] 語意會觸發 Object.prototype 的 __proto__ setter，
+    //    把合併後物件的原型整個換掉（該物件本地污染，非全域）。改用明確跳過 __proto__ 的手動複製。
+    //    順帶過濾掉 null／非物件／缺 id 的元素，避免補成「無 id/name」的幽靈帳戶流入下拉選單。
+    d.accounts = (Array.isArray(d.accounts) ? d.accounts : [])
+      .filter(a => a && typeof a === 'object' && typeof a.id === 'string' && a.id)
+      .map(a => {
+        const out = {};
+        for (const k of Object.keys(a)) if (k !== '__proto__') out[k] = a[k];
+        out.currency = isValidCur(a.currency) ? a.currency : 'JPY';
+        out.initial = Number(a.initial) || 0;
+        out.color = /^#[0-9a-f]{3,8}$/i.test(a.color || '') ? a.color : '#888';
+        return out;
+      });
     migrateRates(d);                // 多幣別遷移：舊單一 rate → rates（冪等；日幣數值原封搬移）
     if (d.rateSource === undefined) d.rateSource = '手動設定';
     if (d.rateUpdatedAt === undefined) d.rateUpdatedAt = null;
