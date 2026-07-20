@@ -320,6 +320,219 @@ scenario('A7', () => {
   w.close();
 });
 
+/* ===== D 系列：📅 日期分組預設收合 ===== */
+
+// 目前 txn-list 裡真正渲染出來的交易列數（收合的日期不會有 .txn）
+const ROWCOUNT = "document.querySelectorAll('#txn-list .txn').length";
+const HEADCOUNT = "document.querySelectorAll('#txn-list .day-head').length";
+
+/* D1: 預設全收合 —— 只看得到日期列，一筆明細都不渲染 */
+scenario('D1', () => {
+  const { w, logs } = bootSeed();
+  eq(w.eval(HEADCOUNT), 2, 'D1 兩個日期各一列組頭（07-17／07-18）');
+  eq(w.eval(ROWCOUNT), 0, 'D1 預設全收合→沒有任何明細列被渲染');
+  ok(/day-group collapsed|collapsed/.test(w.eval("document.getElementById('txn-list').innerHTML")), 'D1 組帶 collapsed class');
+  ok(/dh-count/.test(w.eval("document.getElementById('txn-list').innerHTML")), 'D1 組頭顯示筆數');
+  ok(/當日消費/.test(w.eval("document.getElementById('txn-list').innerHTML")), 'D1 組頭仍顯示當日消費合計');
+  ok(/全部展開/.test(w.eval("document.getElementById('txn-list').innerHTML")), 'D1 有「全部展開」鈕');
+  noErr(logs, 'D1');
+  w.close();
+});
+
+/* D2: 點日期列展開／再點收合，狀態寫進 localStorage */
+scenario('D2', () => {
+  const { w, logs } = bootSeed();
+  w.eval("toggleDayExpanded('2026-07-17');");
+  eq(w.eval(ROWCOUNT), 3, 'D2 展開 07-17→該日 3 筆出現');
+  eq(w.localStorage.getItem('jp_expanded_days'), '["2026-07-17"]', 'D2 展開狀態寫入 localStorage');
+  w.eval("toggleDayExpanded('2026-07-17');");
+  eq(w.eval(ROWCOUNT), 0, 'D2 再點一次→收回');
+  eq(w.localStorage.getItem('jp_expanded_days'), '[]', 'D2 收合後從集合移除');
+  noErr(logs, 'D2');
+  w.close();
+});
+
+/* D3: 全部展開／全部收合 */
+scenario('D3', () => {
+  const { w, logs } = bootSeed();
+  w.eval("setAllDaysExpanded(['2026-07-17','2026-07-18'], true);");
+  eq(w.eval(ROWCOUNT), 5, 'D3 全部展開→5 筆全出現');
+  ok(/全部收合/.test(w.eval("document.getElementById('txn-list').innerHTML")), 'D3 鈕文字翻成「全部收合」');
+  w.eval("setAllDaysExpanded(['2026-07-17','2026-07-18'], false);");
+  eq(w.eval(ROWCOUNT), 0, 'D3 全部收合→回到 0 筆');
+  noErr(logs, 'D3');
+  w.close();
+});
+
+/* D4: 剛新增的那筆，所在日期自動展開（而且是寫進集合，不是暫時強制） */
+scenario('D4', () => {
+  const { w, logs } = bootSeed();
+  eq(w.eval(ROWCOUNT), 0, 'D4 前提：一開始全收合');
+  w.eval(`document.getElementById('f-date').value='2026-07-19';
+    document.getElementById('f-account').value='icoca';
+    document.getElementById('f-amount').value='123';
+    document.getElementById('f-item').value='新買的東西';
+    document.getElementById('f-cat').value='飲食';
+    submitForm(null);`);
+  ok(/新買的東西/.test(w.eval("document.getElementById('txn-list').innerHTML")), 'D4 新增後看得到剛記的那筆');
+  ok(w.eval("getExpandedDays().indexOf('2026-07-19') >= 0"), 'D4 該日寫進展開集合（非暫時強制）');
+  // 關鍵：因為是寫進集合，按收合鈕才會真的收合（不會「越點越展開」）
+  w.eval("toggleDayExpanded('2026-07-19');");
+  ok(!/新買的東西/.test(w.eval("document.getElementById('txn-list').innerHTML")), 'D4 按收合真的收得起來（無反直覺 toggle）');
+  noErr(logs, 'D4');
+  w.close();
+});
+
+/* D5: 選取模式強制展開，且不給收合鈕（收合了沒東西可勾） */
+scenario('D5', () => {
+  const { w, logs } = bootSeed();
+  w.eval('toggleSelectMode();');
+  eq(w.eval(ROWCOUNT), 5, 'D5 選取模式強制全展開');
+  ok(!/day-toggle/.test(w.eval("document.getElementById('txn-list').innerHTML")), 'D5 選取模式不顯示收合鈕');
+  ok(!/全部展開|全部收合/.test(w.eval("document.getElementById('txn-list').innerHTML")), 'D5 選取模式不顯示全部展開列');
+  w.eval('toggleSelectMode();');
+  eq(w.eval(ROWCOUNT), 0, 'D5 離開選取模式→回到收合');
+  noErr(logs, 'D5');
+  w.close();
+});
+
+/* D6: 點某一天的日期篩選 → 那天強制展開 */
+scenario('D6', () => {
+  const { w, logs } = bootSeed();
+  w.eval("setDateFilter('2026-07-17');");
+  eq(w.eval(ROWCOUNT), 3, 'D6 日期篩選時該日強制展開');
+  ok(!/day-toggle/.test(w.eval("document.getElementById('txn-list').innerHTML")), 'D6 篩選單日時不給收合鈕');
+  w.eval("setDateFilter('all');");
+  eq(w.eval(ROWCOUNT), 0, 'D6 取消篩選→回到收合');
+  noErr(logs, 'D6');
+  w.close();
+});
+
+/* D7: 金額排序／自訂順序是跨日平鋪，不受收合影響（零回歸） */
+scenario('D7', () => {
+  const { w, logs } = bootSeed();
+  w.eval("setSort('amt_desc');");
+  eq(w.eval(ROWCOUNT), 5, 'D7 金額排序仍平鋪顯示全部');
+  eq(w.eval(HEADCOUNT), 0, 'D7 金額排序沒有日期組頭');
+  w.eval("setSort('manual');");
+  eq(w.eval(ROWCOUNT), 5, 'D7 自訂順序仍平鋪顯示全部');
+  w.eval("setSort('date_desc');");
+  eq(w.eval(ROWCOUNT), 0, 'D7 切回日期排序→恢復收合');
+  noErr(logs, 'D7');
+  w.close();
+});
+
+/* D8: 換帳本修剪 jp_expanded_days（不同帳本日期會撞，不修剪會誤展開新帳本的同日） */
+scenario('D8', () => {
+  const { w, logs } = boot({ jp_trip_ledger_v2: JSON.stringify(seed), jp_expanded_days: JSON.stringify(['2026-07-17', '1999-01-01']) });
+  eq(w.eval(ROWCOUNT), 3, 'D8 既有展開狀態生效');
+  w.eval("openLedgerModal(); toggleLedgerAdd(true); document.getElementById('lg-new-name').value='另一本'; createLedgerFromForm();");
+  eq(w.localStorage.getItem('jp_expanded_days'), '[]', 'D8 換帳本→新帳本沒有這些日期，全部修剪');
+  noErr(logs, 'D8');
+  w.close();
+});
+
+/* D9: 竄改的 localStorage 不會炸（格式白名單） */
+scenario('D9', () => {
+  const { w, logs } = boot({ jp_trip_ledger_v2: JSON.stringify(seed), jp_expanded_days: '{"evil":1}' });
+  eq(w.eval('JSON.stringify(getExpandedDays())'), '[]', 'D9 非陣列→回空陣列');
+  const { w: w2 } = boot({ jp_trip_ledger_v2: JSON.stringify(seed), jp_expanded_days: JSON.stringify(['2026-07-17', 'not-a-date', 42, null]) });
+  eq(w2.eval('JSON.stringify(getExpandedDays())'), JSON.stringify(['2026-07-17']), 'D9 非日期格式元素剝除');
+  eq(w2.eval("(function(){setDayExpanded('<img src=x>', true); return getExpandedDays().length;})()"), 1, 'D9 setDayExpanded 拒絕非法日期');
+  noErr(logs, 'D9');
+  w.close(); w2.close();
+});
+
+/* ===== K 系列：⌨️ 拆分逐格輸入的鍵盤動線 ===== */
+
+// 在拆分模式下按某一列某一欄的 Enter；回傳事件是否被 preventDefault
+const PRESS_ENTER = (i, fld) => `(function(){
+  const el = document.querySelector('#split-rows .split-row[data-i="${i}"] input[data-fld="${fld}"]');
+  if (!el) return 'NO-ELEMENT';
+  const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  el.dispatchEvent(ev);
+  return ev.defaultPrevented;
+})()`;
+const OPEN_SPLIT = `document.getElementById('f-split-on').checked = true; onSplitToggle();`;
+
+/* K1: ＋加一項沿用上一列的大項／小項（一張收據通常同一分類） */
+scenario('K1', () => {
+  const { w, logs } = bootSeed();
+  w.eval(OPEN_SPLIT);
+  w.eval("splitRows = [{cat:'飲食',subcat:'甜點',item:'大福',amount:'350'}]; renderSplitRows(); addSplitRow();");
+  eq(w.eval("JSON.stringify(splitRows[1])"), JSON.stringify({ cat: '飲食', subcat: '甜點', item: '', amount: '' }), 'K1 新列沿用大項／小項，品項與金額留空');
+  eq(w.eval("document.activeElement.getAttribute('data-fld')"), 'item', 'K1 游標落在新列的品項欄');
+  eq(w.eval("document.activeElement.closest('.split-row').dataset.i"), '1', 'K1 落在「新增的那一列」而非原列');
+  noErr(logs, 'K1');
+  w.close();
+});
+
+/* K2: 品項 Enter → 同一列的金額欄 */
+scenario('K2', () => {
+  const { w, logs } = bootSeed();
+  w.eval(OPEN_SPLIT);
+  eq(w.eval(PRESS_ENTER(0, 'item')), true, 'K2 Enter 被 preventDefault（拆分列在 form 內，不擋會直接送出）');
+  eq(w.eval("document.activeElement.getAttribute('data-fld')"), 'amount', 'K2 游標跳到金額欄');
+  eq(w.eval("document.activeElement.closest('.split-row').dataset.i"), '0', 'K2 停在同一列');
+  noErr(logs, 'K2');
+  w.close();
+});
+
+/* K3: 最後一列的金額 Enter → 自動加一列並跳過去 */
+scenario('K3', () => {
+  const { w, logs } = bootSeed();
+  w.eval(OPEN_SPLIT);
+  w.eval("splitRows = [{cat:'飲食',subcat:'甜點',item:'大福',amount:'350'}]; renderSplitRows();");
+  eq(w.eval(PRESS_ENTER(0, 'amount')), true, 'K3 Enter 被 preventDefault');
+  eq(w.eval('splitRows.length'), 2, 'K3 最後一列按 Enter→自動加一列');
+  eq(w.eval("splitRows[1].cat"), '飲食', 'K3 新列沿用大項');
+  eq(w.eval("document.activeElement.closest('.split-row').dataset.i"), '1', 'K3 游標跳到新列');
+  noErr(logs, 'K3');
+  w.close();
+});
+
+/* K4: 非最後一列的金額 Enter → 跳下一列，不加列 */
+scenario('K4', () => {
+  const { w, logs } = bootSeed();
+  w.eval(OPEN_SPLIT);
+  w.eval("splitRows = [{cat:'飲食',subcat:'',item:'a',amount:'1'},{cat:'飲食',subcat:'',item:'b',amount:'2'}]; renderSplitRows();");
+  w.eval(PRESS_ENTER(0, 'amount'));
+  eq(w.eval('splitRows.length'), 2, 'K4 中間列按 Enter 不會多加列');
+  eq(w.eval("document.activeElement.closest('.split-row').dataset.i"), '1', 'K4 游標跳到下一列');
+  eq(w.eval("document.activeElement.getAttribute('data-fld')"), 'item', 'K4 落在下一列的品項欄');
+  noErr(logs, 'K4');
+  w.close();
+});
+
+/* K5: Enter 不會誤送出表單（拆分列在 <form> 內），也不會弄丟已輸入內容 */
+scenario('K5', () => {
+  const { w, logs } = bootSeed();
+  const before = w.eval('data.txns.length');
+  w.eval(OPEN_SPLIT);
+  w.eval("splitRows = [{cat:'飲食',subcat:'',item:'a',amount:'1'}]; renderSplitRows();");
+  w.eval(PRESS_ENTER(0, 'amount'));
+  eq(w.eval('data.txns.length'), before, 'K5 按 Enter 沒有把表單送出去');
+  eq(w.eval("splitRows[0].item"), 'a', 'K5 已輸入的品項沒被清掉');
+  eq(w.eval("splitRows[0].amount"), '1', 'K5 已輸入的金額沒被清掉');
+  noErr(logs, 'K5');
+  w.close();
+});
+
+/* K6: 非 Enter 鍵完全不干預（不搶輸入） */
+scenario('K6', () => {
+  const { w, logs } = bootSeed();
+  w.eval(OPEN_SPLIT);
+  const r = w.eval(`(function(){
+    const el = document.querySelector('#split-rows .split-row[data-i="0"] input[data-fld="item"]');
+    const ev = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+    el.dispatchEvent(ev);
+    return [ev.defaultPrevented, splitRows.length];
+  })()`);
+  eq(JSON.stringify(r), JSON.stringify([false, 2]), 'K6 一般按鍵不 preventDefault、不加列');
+  noErr(logs, 'K6');
+  w.close();
+});
+
 /* A8: 內建自測在本 fixture 下仍全綠 */
 scenario('A8', () => {
   const { w, logs } = bootSeed();
@@ -330,8 +543,8 @@ scenario('A8', () => {
 
 // 總案數不變式（防「前置條件抽取失敗就靜默 return」導致案數縮水卻全綠）
 const executedTotal = pass + fail;
-if (executedTotal !== 80) {
-  fail++; fails.push(`案數不完整（防靜默掉案）：實際執行 ${executedTotal} 案，預期 80 案`);
+if (executedTotal !== 145) {
+  fail++; fails.push(`案數不完整（防靜默掉案）：實際執行 ${executedTotal} 案，預期 145 案`);
 }
 console.log('FEATURES-E2E: PASS ' + pass + ' / FAIL ' + fail);
 if (fail) { fails.forEach(f => console.log(' - ' + f)); }

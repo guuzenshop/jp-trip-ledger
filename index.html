@@ -127,6 +127,14 @@
   .day-head { display:flex; justify-content:space-between; align-items:baseline; padding:0 4px 6px;
     font-size:12.5px; color:var(--muted); border-bottom:1px solid var(--line); margin-bottom:8px; }
   .day-head .sum { font-weight:700; color:var(--text); }
+  /* 日期分組收合：預設收合成一行（日期＋筆數＋當日消費），點整列展開 */
+  .day-head .dh-left { display:flex; align-items:center; gap:7px; min-width:0; }
+  .day-head.clickable { cursor:pointer; }
+  .day-head.clickable:hover { color:var(--text); }
+  .day-head .day-toggle { padding:1px 6px; font-size:11px; line-height:1.4; flex-shrink:0; }
+  .day-head .dh-count { background:var(--panel2); border-radius:6px; padding:1px 7px; font-size:10px; flex-shrink:0; }
+  .day-group.collapsed .day-head { margin-bottom:0; padding-bottom:7px; }
+  .day-allbtns { display:flex; gap:7px; margin:-2px 4px 10px; }
   .txn-list { display:flex; flex-direction:column; gap:8px; }
   .txn { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:11px 13px;
     display:flex; align-items:center; gap:11px; }
@@ -616,6 +624,7 @@
           </div>
           <div class="hint split-title-hint" id="split-title-hint"></div>
           <div id="split-rows"></div>
+          <div class="hint" style="margin:-2px 0 7px">⌨️ 品項按 Enter 跳到金額；金額按 Enter 自動加下一列（沿用同一個大項／小項）</div>
           <div class="form-actions" style="margin-top:6px">
             <button type="button" class="btn btn-sm" onclick="addSplitRow()">＋ 加一項</button>
             <span class="hint" id="split-sum-line" style="flex:1;align-self:center;text-align:right"></span>
@@ -3087,6 +3096,25 @@ function renderTxns() {
   for (const t of txns) (groups[t.date] = groups[t.date] || []).push(t);
   const dates = Object.keys(groups).sort((a, b) => (asc ? (a < b ? -1 : 1) : (a < b ? 1 : -1)));
 
+  // 📅 剛新增／剛編輯的那一天要看得到 → 直接寫進展開集合（而非只是暫時強制展開），
+  //    否則使用者按收合鈕時 toggle 會把它加進集合、變成「越點越展開」的反直覺行為。
+  const _flash = window._flashId;
+  if (_flash) {
+    const ft = txns.find(t => t.id === _flash);
+    if (ft) setDayExpanded(ft.date, true);
+  }
+  // 選取模式要逐筆勾選、日期篩選只剩一天 → 這兩種情況強制展開且不給收合鈕（收合沒有意義）
+  const forceOpen = selectMode || dateFilter !== 'all';
+  if (!forceOpen && dates.length > 1) {
+    const anyCollapsed = dates.some(d => !isDayExpanded(d));
+    const bar = document.createElement('div');
+    bar.className = 'day-allbtns';
+    bar.innerHTML = `<button class="btn btn-sm" onclick="setAllDaysExpanded(${JSON.stringify(dates).replace(/"/g, '&quot;')},${anyCollapsed})">` +
+      `${anyCollapsed ? '▾ 全部展開' : '▸ 全部收合'}</button>` +
+      `<span class="hint" style="align-self:center">點日期那一列可單獨展開／收合</span>`;
+    host.appendChild(bar);
+  }
+
   for (const date of dates) {
     // 同一天之內也依新增先後：最舊優先=最早新增在上；最新優先=最新新增在上（id 含建立時間戳）
     const items = groups[date].slice().sort((a, b) => asc ? (a.id < b.id ? -1 : 1) : (a.id < b.id ? 1 : -1));
@@ -3096,15 +3124,34 @@ function renderTxns() {
     }
     const group = document.createElement('div');
     group.className = 'day-group';
-    group.innerHTML = `<div class="day-head"><span>${fullDate(date)}</span><span>當日消費 <span class="sum">NT$${Math.round(daySumTWD).toLocaleString('en-US')}</span></span></div>`;
-    const list = document.createElement('div');
-    list.className = 'txn-list';
-    // 🧾 同日同拆分組聚攏（組首位置、組員保原相對順序）；金額/自訂排序平鋪視圖不聚攏（角標識別）
-    for (const node of clusterByGid(items)) {
-      if (node.kind === 'group') list.appendChild(makeGidGroupDiv(node));
-      else list.appendChild(makeTxnDiv(node.t, false));
+    const dayOpen = forceOpen || isDayExpanded(date);
+    group.classList.toggle('collapsed', !dayOpen);
+    const caret = forceOpen ? '' :
+      `<button class="btn btn-sm btn-icon day-toggle" tabindex="-1" aria-hidden="true">${dayOpen ? '▾' : '▸'}</button>`;
+    const head = document.createElement('div');
+    head.className = 'day-head' + (forceOpen ? '' : ' clickable');
+    if (!forceOpen) {
+      head.setAttribute('role', 'button');
+      head.setAttribute('tabindex', '0');
+      head.setAttribute('aria-expanded', String(dayOpen));
+      head.setAttribute('aria-label', `${fullDate(date)} ${items.length} 筆，${dayOpen ? '收合' : '展開'}明細`);
+      head.onclick = () => toggleDayExpanded(date);
+      head.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDayExpanded(date); } };
     }
-    group.appendChild(list);
+    head.innerHTML = `<span class="dh-left">${caret}<span>${fullDate(date)}</span>` +
+      `<span class="dh-count">${items.length} 筆</span></span>` +
+      `<span>當日消費 <span class="sum">NT$${Math.round(daySumTWD).toLocaleString('en-US')}</span></span>`;
+    group.appendChild(head);
+    if (dayOpen) {
+      const list = document.createElement('div');
+      list.className = 'txn-list';
+      // 🧾 同日同拆分組聚攏（組首位置、組員保原相對順序）；金額/自訂排序平鋪視圖不聚攏（角標識別）
+      for (const node of clusterByGid(items)) {
+        if (node.kind === 'group') list.appendChild(makeGidGroupDiv(node));
+        else list.appendChild(makeTxnDiv(node.t, false));
+      }
+      group.appendChild(list);
+    }
     host.appendChild(group);
   }
   window._flashId = null;
@@ -3143,6 +3190,37 @@ function makeGidGroupDiv(node) {
   wrap.appendChild(head);
   if (expanded) for (const t of node.txns) wrap.appendChild(makeTxnDiv(t, false));
   return wrap;
+}
+/* 📅 日期分組收合狀態（預設全收合；展開的日期記在 localStorage，重整後保留）
+   刻意沿用拆分組 gid 那一套已驗證的模式：白名單格式、修剪、選取模式強制展開。 */
+function getExpandedDays() {
+  try { const a = JSON.parse(localStorage.getItem('jp_expanded_days') || '[]'); return Array.isArray(a) ? a.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)) : []; } catch (e) { return []; }
+}
+function isDayExpanded(date) { return getExpandedDays().indexOf(date) >= 0; }
+function setDayExpanded(date, on) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return;
+  const a = getExpandedDays();
+  const i = a.indexOf(date);
+  if (on && i < 0) a.push(date); else if (!on && i >= 0) a.splice(i, 1); else return;
+  try { localStorage.setItem('jp_expanded_days', JSON.stringify(a)); } catch (e) {}
+}
+function toggleDayExpanded(date) { setDayExpanded(date, !isDayExpanded(date)); renderTxns(); }
+// 只保留「目前這本確實存在」的日期（換帳本／刪光某天後修剪，避免這個全域 key 無限累積）
+function pruneExpandedDays() {
+  try {
+    const alive = new Set();
+    for (const t of (data.txns || [])) if (t.date) alive.add(t.date);
+    localStorage.setItem('jp_expanded_days', JSON.stringify(getExpandedDays().filter(d => alive.has(d))));
+  } catch (e) {}
+}
+// 全部展開／全部收合（作用於目前清單中出現的日期）
+function setAllDaysExpanded(dates, on) {
+  try {
+    const keep = on ? Array.from(new Set(getExpandedDays().concat(dates)))
+                    : getExpandedDays().filter(d => dates.indexOf(d) < 0);
+    localStorage.setItem('jp_expanded_days', JSON.stringify(keep));
+  } catch (e) {}
+  renderTxns();
 }
 // 🧾 拆分組收合狀態（預設收合成一行；展開的 gid 記在 localStorage，重整後保留）
 function getExpandedGids() {
@@ -3711,6 +3789,7 @@ function resetTransientState() {
   _batchModalApply = null;
   _summaryExpandedCats.clear(); _summaryExpandedPays.clear();
   pruneExpandedGids();   // 展開中的拆分組是全域 key，修剪掉不屬於這本的殘留
+  pruneExpandedDays();   // 📅 展開中的日期同理（不同帳本日期會撞，不修剪會把新帳本的同日誤展開）
 }
 function switchLedger(id, quiet) {
   const l = store.ledgers.find(x => x.id === id);
@@ -4813,7 +4892,27 @@ function resetSplitBlock() {
   setSplitTitle('');               // 🏷️ 大標題不跨筆殘留（下一筆拆分要從空白開始）
   applySplitVisibility();
 }
-function addSplitRow() { splitRows.push(emptySplitRow()); renderSplitRows(); updateSplitSum(); }
+// ＋加一項：沿用上一列的大項／小項（一張收據通常同一分類），並把游標送到新列的品項欄
+function addSplitRow(focusNew) {
+  const last = splitRows[splitRows.length - 1];
+  splitRows.push(last ? { cat: last.cat || '', subcat: last.subcat || '', item: '', amount: '' } : emptySplitRow());
+  renderSplitRows(); updateSplitSum();
+  if (focusNew !== false) focusSplitField(splitRows.length - 1, 'item');
+}
+// 鍵盤動線：品項 Enter → 同列金額；金額 Enter → 下一列品項（在最後一列則先自動加一列）
+function focusSplitField(i, fld) {
+  const el = document.querySelector(`#split-rows .split-row[data-i="${i}"] input[data-fld="${fld}"]`);
+  if (!el) return;
+  el.focus();
+  try { el.select(); } catch (e) {}
+}
+function onSplitKey(e, i, fld) {
+  if (!e || e.key !== 'Enter') return;
+  e.preventDefault();          // 拆分列在 <form> 內，不擋會直接觸發送出
+  if (fld === 'item') { focusSplitField(i, 'amount'); return; }
+  if (i >= splitRows.length - 1) addSplitRow();     // 最後一列 → 自動加一列並跳過去
+  else focusSplitField(i + 1, 'item');
+}
 function removeSplitRow(i) {
   splitRows.splice(i, 1);
   if (splitRows.length === 0) splitRows.push(emptySplitRow());
@@ -4857,8 +4956,8 @@ function renderSplitRows() {
     return `<div class="split-row" data-i="${i}">` +
       `<select onchange="onSplitCat(${i},this.value)" aria-label="大項">${catOpts(r.cat)}</select>` +
       `<input type="text" value="${escapeHtml(r.subcat)}" list="ssub-${i}" placeholder="小項" oninput="onSplitInput(${i},'subcat',this.value)" aria-label="小項"><datalist id="ssub-${i}">${subs}</datalist>` +
-      `<input type="text" value="${escapeHtml(r.item)}" placeholder="品項/名稱" oninput="onSplitInput(${i},'item',this.value)" aria-label="品項">` +
-      `<input type="number" inputmode="decimal" step="any" value="${escapeHtml(r.amount)}" placeholder="金額" oninput="onSplitInput(${i},'amount',this.value)" aria-label="金額">` +
+      `<input type="text" data-fld="item" value="${escapeHtml(r.item)}" placeholder="品項/名稱" oninput="onSplitInput(${i},'item',this.value)" onkeydown="onSplitKey(event,${i},'item')" aria-label="品項">` +
+      `<input type="number" data-fld="amount" inputmode="decimal" step="any" value="${escapeHtml(r.amount)}" placeholder="金額" oninput="onSplitInput(${i},'amount',this.value)" onkeydown="onSplitKey(event,${i},'amount')" aria-label="金額">` +
       `<button type="button" class="btn btn-sm btn-danger multi-del" onclick="removeSplitRow(${i})" aria-label="移除這項">✕</button>` +
     `</div>`;
   }).join('');
