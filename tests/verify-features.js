@@ -9,8 +9,33 @@ const html = fs.readFileSync(APP, 'utf8');
 let pass = 0, fail = 0; const fails = [];
 const ok = (c, n) => { if (c) pass++; else { fail++; fails.push(n); } };
 const eq = (a, b, n) => ok(a === b, `${n} [got=${JSON.stringify(a)} want=${JSON.stringify(b)}]`);
+
+/* 逐案斷言數宣告（取代「總數魔數 145」）——理由同 verify-regress.js：
+   總數魔數只要改大就過（橡皮圖章），且「A 案少 3 條、B 案多 3 條」會互相抵銷完全看不出來。
+   DUMP_PLAN=1 可印出實際逐案斷言數，用來機械產生／校正本表。 */
+const PLAN = {
+  F1: 6, F2: 4, F3: 4, F4: 3, F5: 5, F6: 3, F7: 3, F8: 4, F9: 6, F10: 5, F11: 4,   // 🏷️ 大標題 小計 47
+  A1: 6, A2: 4, A3: 4, A4: 5, A5: 6, A6: 4, A7: 3, A8: 1,                          // 📊 六維篩選 小計 33
+  D1: 7, D2: 5, D3: 4, D4: 5, D5: 5, D6: 4, D7: 5, D8: 3, D9: 4,                   // 📅 日期收合 小計 42
+  K1: 4, K2: 4, K3: 5, K4: 4, K5: 4, K6: 2,                                        // ⌨️ 鍵盤動線 小計 23
+};
+const RAN = {};
 function scenario(name, fn) {
-  try { fn(); } catch (e) { fail++; fails.push(name + ' THREW: ' + (e && e.message)); console.log('!! ' + name + ': ' + (e && e.stack || e)); }
+  const want = PLAN[name];
+  const p0 = pass, f0 = fail;
+  let threw = null;
+  try { fn(); } catch (e) { threw = e; }
+  const ran = (pass - p0) + (fail - f0);
+  RAN[name] = ran;
+  if (want == null) { fail++; fails.push(`${name} 未登錄於 PLAN（新增案子必須同時宣告斷言數）`); return; }
+  if (threw) {
+    const missing = Math.max(0, want - ran);
+    fail += Math.max(1, missing);   // 未執行的斷言整批記 fail，避免案數靜默縮水卻仍看似只多 1 個 FAIL
+    fails.push(`${name} THREW: ${threw && threw.message}` + (missing ? `（${missing} 條未執行，已整批記 fail）` : ''));
+    console.log('!! ' + name + ': ' + (threw && threw.stack || threw));
+    return;
+  }
+  if (ran !== want) { fail++; fails.push(`${name} 斷言數 ${ran} ≠ PLAN 宣告 ${want}（PLAN 未同步，或有靜默略過路徑）`); }
 }
 
 // 兩個帳戶不同幣別、三個大項 → 足以驗證「幣別 × 支付 × 大項」的交集
@@ -541,10 +566,13 @@ scenario('A8', () => {
   w.close();
 });
 
-// 總案數不變式（防「前置條件抽取失敗就靜默 return」導致案數縮水卻全綠）
+// 總案數不變式：期望總數由 PLAN 自動加總（不再有第二個需人工同步的魔數）。
+// 只在「縮水」時額外記一筆；膨脹一定已被逐案的「斷言數 ≠ PLAN」指名抓到，不重複報。
+const PLAN_TOTAL = Object.values(PLAN).reduce((a, b) => a + b, 0);
 const executedTotal = pass + fail;
-if (executedTotal !== 145) {
-  fail++; fails.push(`案數不完整（防靜默掉案）：實際執行 ${executedTotal} 案，預期 145 案`);
+if (process.env.DUMP_PLAN === '1') console.log('PLAN dump:', JSON.stringify(RAN));
+if (executedTotal < PLAN_TOTAL) {
+  fail++; fails.push(`案數不完整（防靜默掉案）：實際執行 ${executedTotal} 案，PLAN 宣告 ${PLAN_TOTAL} 案`);
 }
 console.log('FEATURES-E2E: PASS ' + pass + ' / FAIL ' + fail);
 if (fail) { fails.forEach(f => console.log(' - ' + f)); }

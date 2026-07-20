@@ -27,9 +27,47 @@ const html = fs.readFileSync(APP, 'utf8');
 let pass = 0, fail = 0; const fails = [];
 const ok = (c, n) => { if (c) pass++; else { fail++; fails.push(n); } };
 const eq = (a, b, n) => ok(a === b, `${n} [got=${JSON.stringify(a)} want=${JSON.stringify(b)}]`);
+
+/* 逐案斷言數宣告（取代「總數魔數」）：
+   總數魔數的問題是——加案子的人只要把總數改大就過了，等於橡皮圖章，
+   而且「某一案少跑 3 條、另一案多跑 3 條」會互相抵銷、完全看不出來。
+   改成逐案宣告後：① 新增案子必須在這裡登錄，改的是有語意的一行；
+   ② 任何一案的斷言數與宣告不符（含 throw 導致中途中止）都會被指名道姓抓出來；
+   ③ 期望總數由本表自動加總，不再有第二個需要人工同步的數字。
+   DUMP_PLAN=1 可印出實際逐案斷言數，用來機械產生／校正本表。 */
+const PLAN = {
+  // 第四／五輪（合計 65，與本表取代的舊魔數相同）
+  R1: 7, R2: 7, R3: 7, R4: 9, R5: 3, R6: 4, R7: 6, R8: 4, R9: 4, R10: 5,
+  R11: 4, R12: 3, R13: 2,
+  // 第六輪（合計 30）
+  R14: 4, R15: 4, R16: 4, R17: 4, R18: 2, R19: 2, R20: 3, R21: 6, R22: 1,
+};
+const RAN = {};
+function _reconcile(name, want, p0, f0, threw) {
+  const ran = (pass - p0) + (fail - f0);
+  RAN[name] = ran;
+  if (want == null) { fail++; fails.push(`${name} 未登錄於 PLAN（新增案子必須同時宣告斷言數）`); return; }
+  if (threw) {
+    const missing = Math.max(0, want - ran);
+    fail += Math.max(1, missing);          // 未執行的斷言整批記 fail，不是只記 1（否則案數會靜默縮水）
+    fails.push(`${name} THREW: ${threw && threw.message}` + (missing ? `（${missing} 條未執行，已整批記 fail）` : ''));
+    console.log('!! ' + name + ': ' + (threw && threw.stack || threw));
+    return;
+  }
+  if (ran !== want) { fail++; fails.push(`${name} 斷言數 ${ran} ≠ PLAN 宣告 ${want}（PLAN 未同步，或有靜默略過路徑）`); }
+}
 function scenario(name, fn) {
-  try { return fn(); }
-  catch (e) { fail++; fails.push(name + ' THREW: ' + (e && e.message)); console.log('!! ' + name + ': ' + (e && e.stack || e)); }
+  const want = PLAN[name];
+  const p0 = pass, f0 = fail;
+  let ret;
+  try { ret = fn(); }
+  catch (e) { _reconcile(name, want, p0, f0, e); return; }
+  if (ret && typeof ret.then === 'function') {          // R3／R9 是 async，必須等它跑完才結算
+    return ret.then(v => { _reconcile(name, want, p0, f0, null); return v; },
+                    e => { _reconcile(name, want, p0, f0, e); });
+  }
+  _reconcile(name, want, p0, f0, null);
+  return ret;
 }
 
 function mk(extra) {
@@ -422,11 +460,179 @@ scenario('R13', () => {
   eq(bak.length, 2, 'R13-b ★ 連續相同內容的過期鏡射只推入一次，之後被去重擋下（不會逐次灌入陣列）');
 });
 
-// 總數不變式：防止未來有人像 M-3 那樣讓某個案子「抽取失敗就靜默 return」，
-// 使總案數悄悄縮水卻仍然顯示全綠。這個數字每次新增/刪除斷言都要跟著更新。
+/* ===== 第六輪外部審查（Cowork + Claude Code，標的 8351c5e）確認的缺陷 =====
+   R14 txn.date 未淨化 → 內插進「全部展開」鈕的 onclick → 儲存型 XSS（High）
+   R15 同上，經刪除備份還原／衝突備份還原兩條路徑（High）
+   R16 txn.id 未淨化 → 內插進 startInlineEdit/moveTxn 的 onclick 單引號字串（High，本輪自查追加）
+   R17 CSV 對退化組仍輸出大標題／拆分組，與顯示層口徑不一致（Medium）
+   R18 同一 gid 掛不同 gtitle（載入路徑）→ 同組三種標籤（Medium）
+   R19 金額／自訂排序下新增交易，該日未寫入展開集合 → 切回日期排序找不到剛記那筆（Medium）
+   R20 換帳本未清大標題欄／展開集合 → 標題被寫進另一本、上一本展開狀態外洩（Medium）
+   R21 拆分模式 Enter 觸發表單隱式送出（整組被提前記帳）＋ IME 組字被當動線指令（High）
+   R22 getExpandedGids 缺元素白名單（Low，與 getExpandedDays 不對稱） */
+
+const EVIL_DATE = '2026-07-18&quot;]);window.__PWNED=1;//';
+const EVIL_ID = "x');window.__PWNED2=1;//";
+const mkDays = (txns) => mk({ txns });
+const TWO_DAYS = [
+  { id: 'd1', type: 'expense', date: EVIL_DATE, account: 'jpy', amount: 100, cat: '飲食', item: '惡意' },
+  { id: 'd2', type: 'expense', date: '2026-07-17', account: 'jpy', amount: 200, cat: '飲食', item: '正常' },
+];
+// 「全部展開」鈕：日期若被內插進 onclick，這裡就會看到 payload；點下去會執行它
+function allDaysProbe(w) {
+  const btn = w.document.querySelector('.day-allbtns button');
+  if (!btn) return { found: false, html: '', pwned: false };
+  const outer = btn.outerHTML;
+  try { btn.click(); } catch (e) {}
+  return { found: true, html: outer, pwned: w.__PWNED === 1 };
+}
+
+scenario('R14', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mkDays(TWO_DAYS)) });
+  const dates = w.eval('JSON.stringify(data.txns.map(t=>t.date))');
+  ok(dates.indexOf('__PWNED') < 0, 'R14-a ★★ 載入路徑把非法 date 正規化（不再原封留在資料裡）');
+  const p = allDaysProbe(w);
+  ok(p.found, 'R14-b 「全部展開」鈕有渲染出來（否則後面兩條等於沒測到）');
+  ok(p.html.indexOf('__PWNED') < 0, 'R14-c ★★ 鈕的 outerHTML 不含未逸出的 payload');
+  ok(!p.pwned, 'R14-d ★★ 點下去不會執行注入的 JS');
+});
+
+scenario('R15', () => {
+  const evil = mkDays(TWO_DAYS); evil.ledgerName = '惡意本';
+  // ① 刪除備份還原
+  const b1 = boot({ jp_trip_ledger_v2: JSON.stringify(mk()), jp_trip_ledger_deleted_bak: JSON.stringify(evil) });
+  b1.w.eval('restoreDeletedLedger()');
+  const p1 = allDaysProbe(b1.w);
+  ok(b1.w.eval('JSON.stringify(data.txns.map(t=>t.date))').indexOf('__PWNED') < 0, 'R15-a ★★ 刪除備份還原：date 已正規化');
+  ok(!p1.pwned, 'R15-b ★★ 刪除備份還原：點「全部展開」不會執行注入的 JS');
+  // ② 衝突備份還原（陣列元素本身就是帳本物件）
+  const b2 = boot({ jp_trip_ledger_v2: JSON.stringify(mk()), jp_trip_ledger_conflict_bak: JSON.stringify([evil]) });
+  b2.w.eval('restoreConflictBak()');
+  const p2 = allDaysProbe(b2.w);
+  ok(b2.w.eval('JSON.stringify(data.txns.map(t=>t.date))').indexOf('__PWNED') < 0, 'R15-c ★★ 衝突備份還原：date 已正規化');
+  ok(!p2.pwned, 'R15-d ★★ 衝突備份還原：點「全部展開」不會執行注入的 JS');
+});
+
+scenario('R16', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mkDays([
+    { id: EVIL_ID, type: 'expense', date: '2026-07-18', account: 'jpy', amount: 100, cat: '飲食', item: '惡意' },
+    { id: 'ok1', type: 'expense', date: '2026-07-17', account: 'jpy', amount: 200, cat: '飲食', item: '正常' },
+  ])) });
+  ok(w.eval('JSON.stringify(data.txns.map(t=>t.id))').indexOf('__PWNED2') < 0, 'R16-a ★★ 載入路徑重發非法 txn id');
+  w.eval("sortMode='manual'; render();");
+  const btn = w.document.querySelector('.move-btn');
+  ok(!!btn, 'R16-b 自訂排序的移動鈕有渲染（否則後兩條沒測到）');
+  ok(!btn || btn.outerHTML.indexOf('__PWNED2') < 0, 'R16-c ★★ moveTxn 的 onclick 不含注入 payload');
+  if (btn) { try { btn.click(); } catch (e) {} }
+  ok(w.__PWNED2 !== 1, 'R16-d ★★ 點移動鈕不會執行注入的 JS');
+});
+
+scenario('R17', () => {
+  const g = [
+    { id: 'q1', type: 'expense', date: '2026-07-18', account: 'jpy', amount: 100, cat: '購物', item: '衣服', gid: 'gg1', gtitle: 'UNIQLO' },
+    { id: 'q2', type: 'expense', date: '2026-07-18', account: 'jpy', amount: 200, cat: '購物', item: '褲子', gid: 'gg1', gtitle: 'UNIQLO' },
+  ];
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mkDays(g)) });
+  const csvOf = () => w.eval(`(function(){var cap=null;var orig=download;download=function(n,c){cap=c;};try{exportCSV();}finally{download=orig;}return cap;})()`);
+  const before = csvOf();
+  ok((before.split('\n').find(l => l.indexOf('褲子') >= 0) || '').indexOf('UNIQLO') >= 0,
+    'R17-a 正控：仍成組時 CSV 確實有大標題（否則後面那條會因為「本來就沒有」而假過）');
+  w.eval("del('q1')");
+  ok(w.eval("isGrouped(data.txns.find(t=>t.id==='q2'))") === false, 'R17-b 刪成單筆後顯示層已退化');
+  const after = csvOf().split('\n').find(l => l.indexOf('褲子') >= 0) || '';
+  ok(after.indexOf('UNIQLO') < 0, 'R17-c ★★ 退化組的 CSV 不再輸出大標題（與顯示層同口徑）');
+  ok(after.indexOf('gg1') < 0, 'R17-d ★★ 退化組的 CSV 不再輸出拆分組 gid');
+});
+
+scenario('R18', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mkDays([
+    { id: 'u1', type: 'expense', date: '2026-07-18', account: 'jpy', amount: 100, cat: '購物', item: '甲', gid: 'gu1', gtitle: '標題A' },
+    { id: 'u2', type: 'expense', date: '2026-07-18', account: 'jpy', amount: 200, cat: '購物', item: '乙', gid: 'gu1', gtitle: '標題B' },
+    { id: 'u3', type: 'expense', date: '2026-07-18', account: 'jpy', amount: 300, cat: '購物', item: '丙', gid: 'gu1' },
+  ])) });
+  const titles = JSON.parse(w.eval("JSON.stringify(data.txns.filter(t=>t.gid==='gu1').map(t=>t.gtitle||null))"));
+  eq(new Set(titles).size, 1, 'R18-a ★★ 載入路徑把同一 gid 的大標題統一（不會同組三種標籤）');
+  eq(titles[0], '標題A', 'R18-b 統一成組內第一個合法標題');
+});
+
+scenario('R19', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mkDays(TWO_DAYS.map((t, i) => ({ ...t, date: i ? '2026-07-17' : '2026-07-18' })))) });
+  w.eval("localStorage.setItem('jp_expanded_days','[]'); sortMode='amt_desc'; render();");
+  w.eval(`
+    document.getElementById('f-date').value = '2026-07-16';
+    document.getElementById('f-account').value = 'jpy';
+    document.getElementById('f-item').value = '新買的';
+    document.getElementById('f-amount').value = '999';
+    document.getElementById('f-cat').value = '飲食';
+    submitForm(null);
+  `);
+  ok(w.eval("isDayExpanded('2026-07-16')"), 'R19-a ★★ 金額排序下新增交易，該日仍寫進展開集合');
+  w.eval("sortMode='date_desc'; render();");
+  ok(w.eval(`[...document.querySelectorAll('.day-group')].some(g=>g.textContent.indexOf('新買的')>=0)`),
+    'R19-b ★★ 切回日期排序看得到剛新增的那筆（不是被收合藏起來）');
+});
+
+scenario('R20', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mkDays(TWO_DAYS.map((t, i) => ({ ...t, date: i ? '2026-07-17' : '2026-07-18' })))) });
+  w.eval(`(function(){
+    var nl = normalizeLedger(JSON.parse(JSON.stringify(data)));
+    nl.id='LB'; nl.ledgerName='第二本'; nl.archived=false; store.ledgers.push(nl); save();
+  })()`);
+  w.eval("setDayExpanded('2026-07-17', true);");
+  w.eval(`document.getElementById('f-split-on').checked = true; onSplitToggle();
+          document.getElementById('f-split-title').value='甲本的UNIQLO'; onSplitTitleInput();`);
+  w.eval("switchLedger('LB', true)");
+  eq(w.eval("document.getElementById('f-split-title').value"), '', 'R20-a ★★ 換帳本清空大標題欄（否則會被寫進另一本的資料）');
+  eq(w.localStorage.getItem('jp_expanded_days'), '[]', 'R20-b ★ 換帳本清空日期展開集合（共用日期不外洩）');
+  eq(w.localStorage.getItem('jp_expanded_gids'), '[]', 'R20-c ★ 換帳本清空拆分組展開集合');
+});
+
+scenario('R21', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mk()) });
+  w.eval(`
+    document.getElementById('f-split-on').checked = true; onSplitToggle();
+    splitRows = [{cat:'飲食',subcat:'晚餐',item:'衣服',amount:'1000'}];
+    renderSplitRows(); updateSplitSum();
+  `);
+  const fire = (sel, composing) => w.eval(`(function(){
+    var el = ${sel}; if (!el) return null;
+    el.focus();
+    var ev = new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});
+    ${composing ? "Object.defineProperty(ev,'isComposing',{get:function(){return true}});" : ''}
+    el.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  })()`);
+  ok(fire("document.getElementById('f-split-title')") === true,
+    'R21-a ★★ 拆分模式：大標題欄的 Enter 被擋（不會觸發表單隱式送出）');
+  ok(fire(`document.querySelector('#split-rows .split-row[data-i="0"] input[list]')`) === true,
+    'R21-b ★★ 拆分模式：小項欄的 Enter 被擋');
+  ok(fire("document.getElementById('f-note')") === true,
+    'R21-c ★ 拆分模式：備註欄等其他 input 的 Enter 也被擋（表單層統一收，不逐欄補）');
+  ok(fire(`document.querySelector('#split-rows .split-row[data-i="0"] input[data-fld="item"]')`, true) === false,
+    'R21-d ★★ IME 組字中的 Enter 原樣放行（中/日文輸入確認候選字不被當動線指令）');
+  const focusAfterIME = w.eval("document.activeElement.getAttribute('data-fld')");
+  eq(focusAfterIME, 'item', 'R21-e ★★ IME 組字中的 Enter 不搬游標');
+  w.eval("document.getElementById('f-split-on').checked = false; onSplitToggle();");
+  ok(fire("document.getElementById('f-item')") === false,
+    'R21-f ★ 單筆模式維持原行為（Enter 仍可快速送出，不改既有習慣）');
+});
+
+scenario('R22', () => {
+  const { w } = boot({
+    jp_trip_ledger_v2: JSON.stringify(mk()),
+    jp_expanded_gids: JSON.stringify(['ok1', { a: 1 }, null, 123, '<img src=x>']),
+  });
+  eq(w.eval('JSON.stringify(getExpandedGids())'), JSON.stringify(['ok1']),
+    'R22-a ★ getExpandedGids 有元素白名單（與 getExpandedDays 對稱，註解本來就這樣宣稱）');
+});
+
+// 總數不變式：期望總數由 PLAN 自動加總（不再有第二個需人工同步的魔數）。
+// 只在「縮水」時額外記一筆：膨脹一定已經被逐案的「斷言數 ≠ PLAN」抓到，不重複報。
+const PLAN_TOTAL = Object.values(PLAN).reduce((a, b) => a + b, 0);
 const executedTotal = pass + fail;
-if (executedTotal !== 65) {
-  fail++; fails.push(`案數不完整（防靜默掉案）：實際執行 ${executedTotal} 案，預期 65 案`);
+if (process.env.DUMP_PLAN === '1') console.log('PLAN dump:', JSON.stringify(RAN));
+if (executedTotal < PLAN_TOTAL) {
+  fail++; fails.push(`案數不完整（防靜默掉案）：實際執行 ${executedTotal} 案，PLAN 宣告 ${PLAN_TOTAL} 案`);
 }
 console.log(`REGRESS: PASS ${pass} / FAIL ${fail}`);
 if (fails.length) { console.log('FAILS:\n - ' + fails.join('\n - ')); process.exit(1); }

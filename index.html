@@ -582,7 +582,7 @@
         <label><input type="radio" name="entrymode" value="multi" onchange="setEntryMode('multi')"><span>多列</span></label>
       </div>
     </div>
-    <form id="entry-form" onsubmit="return submitForm(event)">
+    <form id="entry-form" onsubmit="return submitForm(event)" onkeydown="onEntryFormKey(event)">
       <div class="seg">
         <label><input type="radio" name="ttype" value="expense" checked onchange="onTypeChange()"><span>💸 消費</span></label>
         <label><input type="radio" name="ttype" value="topup" onchange="onTypeChange()"><span>🔄 儲值／轉帳</span></label>
@@ -624,7 +624,7 @@
           </div>
           <div class="hint split-title-hint" id="split-title-hint"></div>
           <div id="split-rows"></div>
-          <div class="hint" style="margin:-2px 0 7px">⌨️ 品項按 Enter 跳到金額；金額按 Enter 自動加下一列（沿用同一個大項／小項）</div>
+          <div class="hint" style="margin:-2px 0 7px">⌨️ 大標題／小項按 Enter 跳到品項；品項按 Enter 跳到金額；金額按 Enter 自動加下一列（沿用同一個大項／小項）</div>
           <div class="form-actions" style="margin-top:6px">
             <button type="button" class="btn btn-sm" onclick="addSplitRow()">＋ 加一項</button>
             <span class="hint" id="split-sum-line" style="flex:1;align-self:center;text-align:right"></span>
@@ -1583,6 +1583,33 @@ function normalizeLedgerFields(d) {
         out.color = /^#[0-9a-f]{3,8}$/i.test(a.color || '') ? a.color : '#888';
         return out;
       });
+    // 🛡️ 交易列白名單（冪等）：與 sanitizeImport 同一套，理由與上面的帳戶白名單完全相同 ——
+    //    load／v2 鏡射救援／刪除備份還原／衝突備份還原都不經過 sanitizeImport，而 txn 有兩個欄位
+    //    會被內插進 inline handler 的 JS 字串裡：
+    //      t.id   → onclick="startInlineEdit('…')" / moveTxn('…') 等 5 處（單引號字串）
+    //      t.date → 「全部展開／收合」鈕的 onclick（3112；該處另已改為事件委派，這裡是根因防線）
+    //    舊版匯入的惡意備份留在 localStorage，新版載入時就會變成儲存型 XSS（已實測可執行任意 JS）。
+    //    ⚠️ 同樣不可用 Object.assign（惡意「自有」__proto__ 鍵會觸發原型替換），用明確跳過的手動複製。
+    const _seenTxnId = new Set();
+    d.txns = (Array.isArray(d.txns) ? d.txns : [])
+      .filter(t => t && typeof t === 'object')
+      .map(t => {
+        const out = {};
+        for (const k of Object.keys(t)) if (k !== '__proto__') out[k] = t[k];
+        let id = /^[a-z0-9]{1,32}$/i.test(t.id || '') ? t.id : genId();
+        while (_seenTxnId.has(id)) id = genId();   // 撞號重發：id 無跨物件參照，重發不影響其他資料
+        _seenTxnId.add(id);
+        out.id = id;
+        out.type = (t.type === 'expense' || t.type === 'topup') ? t.type : 'expense';
+        out.amount = Number(t.amount) || 0;
+        if (t.toAmount != null) out.toAmount = Number(t.toAmount) || 0;
+        out.date = /^\d{4}-\d{2}-\d{2}$/.test(t.date || '') ? t.date : today();
+        if (!(out.type === 'expense' && validGid(t.gid))) delete out.gid;
+        const gt = normGTitle(t.gtitle);
+        if (out.gid && gt) out.gtitle = gt; else delete out.gtitle;
+        return out;
+      });
+    reconcileGroupTitles(d.txns);   // 同組共用一個大標題（逐筆白名單擋不住「同組不同標題」）
     migrateRates(d);                // 多幣別遷移：舊單一 rate → rates（冪等；日幣數值原封搬移）
     if (d.rateSource === undefined) d.rateSource = '手動設定';
     if (d.rateUpdatedAt === undefined) d.rateUpdatedAt = null;
@@ -1853,6 +1880,19 @@ function titledItem(item, gtitle) {
   const it = (item == null ? '' : String(item));
   return g ? g + '：' + it : it;
 }
+// 🏷️ 同組標題一致化：逐筆白名單擋得住「格式非法」，擋不住「同一個 gid 卻掛不同標題」的竄改資料
+//   （匯入／備份還原都可能送進來，畫面上會變成同一組三種標籤）。取組內第一個非空標題套給全組，
+//   整組都沒有就整組不留。匯入與載入共用這一份，避免兩條路徑各自實作而漂移。
+function reconcileGroupTitles(txns) {
+  const first = new Map();
+  for (const t of (txns || [])) if (t && t.gid && t.gtitle && !first.has(t.gid)) first.set(t.gid, t.gtitle);
+  for (const t of (txns || [])) {
+    if (!t || !t.gid) continue;
+    const g = first.get(t.gid);
+    if (g) t.gtitle = g; else delete t.gtitle;
+  }
+  return txns;
+}
 // 編輯整筆替換時保留拆分組欄位（submitForm 編輯分支重組新物件會丟欄位）；改成 topup 則不帶
 function preserveGid(oldTxn, newTxn) {
   if (oldTxn && validGid(oldTxn.gid) && newTxn.type === 'expense') {
@@ -1946,7 +1986,10 @@ function subKeyOf(t) { return catKeyOf(t) + KEYSEP + ((t && t.subcat) || '（無
 function subKeyLabel(k) { return String(k).split(KEYSEP).join(' › '); }
 // 完整分析篩選（6 維度）：星期(0-6)／指定日期／大項／小項(複合鍵)／支付帳戶／幣別
 //   維度之間 AND、維度內部 OR；某維度空陣列＝該維度全通過。純函式，回新陣列。
-//   curOf(accountId)→幣別代碼：幣別維度專用；未提供時該維度不生效（保持不依賴 data，可離線單測）
+//   curOf(accountId)→幣別代碼：幣別維度專用。⚠️ 未提供 curOf（或解不出幣別）時是 **fail-closed**：
+//   幣別維度有選就一律濾掉，不是「該維度不生效」——原註解寫反了，呼叫端請以此為準。
+//   （帳戶維度比對的是 t.account 字串本身，不解析帳戶；UI 端 removeAccount 擋掉「仍有記錄的帳戶」，
+//     所以解不出帳戶的孤兒交易只可能來自手改匯入檔。）
 function filterTxnsForAnalysis(txns, filter, curOf) {
   const f = filter || {};
   const wds = f.weekdays || [], dts = f.dates || [];
@@ -3057,6 +3100,17 @@ function renderTxns() {
     return;
   }
 
+  // 📅 剛新增／剛編輯的那一天要看得到 → 直接寫進展開集合（而非只是暫時強制展開），
+  //    否則使用者按收合鈕時 toggle 會把它加進集合、變成「越點越展開」的反直覺行為。
+  //    ⚠️ 必須放在 sortMode 分支「之前」：日期是資料屬性，與當前排序模式無關。
+  //    原本寫在日期排序段內，金額／自訂排序下新增交易只會把 _flashId 清掉而不寫入集合，
+  //    切回日期排序時那天仍是收合的 → 使用者找不到剛記的那筆。
+  const _flash = window._flashId;
+  if (_flash) {
+    const ft = txns.find(t => t.id === _flash);
+    if (ft) setDayExpanded(ft.date, true);
+  }
+
   // 自訂順序（手動拖曳）→ 依 data.txns 陣列順序，平鋪、每筆可拖曳
   if (sortMode === 'manual') {
     if (!selectMode) {   // 選取模式下無拖曳把手，提示會誤導 → 不顯示，也不綁拖曳
@@ -3096,22 +3150,26 @@ function renderTxns() {
   for (const t of txns) (groups[t.date] = groups[t.date] || []).push(t);
   const dates = Object.keys(groups).sort((a, b) => (asc ? (a < b ? -1 : 1) : (a < b ? 1 : -1)));
 
-  // 📅 剛新增／剛編輯的那一天要看得到 → 直接寫進展開集合（而非只是暫時強制展開），
-  //    否則使用者按收合鈕時 toggle 會把它加進集合、變成「越點越展開」的反直覺行為。
-  const _flash = window._flashId;
-  if (_flash) {
-    const ft = txns.find(t => t.id === _flash);
-    if (ft) setDayExpanded(ft.date, true);
-  }
+  // （_flashId → 寫進展開集合已提到 sortMode 分支之前，三種排序模式共用同一條規則）
   // 選取模式要逐筆勾選、日期篩選只剩一天 → 這兩種情況強制展開且不給收合鈕（收合沒有意義）
   const forceOpen = selectMode || dateFilter !== 'all';
   if (!forceOpen && dates.length > 1) {
     const anyCollapsed = dates.some(d => !isDayExpanded(d));
     const bar = document.createElement('div');
     bar.className = 'day-allbtns';
-    bar.innerHTML = `<button class="btn btn-sm" onclick="setAllDaysExpanded(${JSON.stringify(dates).replace(/"/g, '&quot;')},${anyCollapsed})">` +
-      `${anyCollapsed ? '▾ 全部展開' : '▸ 全部收合'}</button>` +
-      `<span class="hint" style="align-self:center">點日期那一列可單獨展開／收合</span>`;
+    // ⚠️ 日期一律不進 HTML 字串：原本用 JSON.stringify(dates).replace(/"/g,'&quot;') 內插進 onclick，
+    //    但沒逸出 &，date 內含字面「&quot;」即可脫逃 JS 字串執行任意程式（已實測）。改走事件委派，
+    //    dates 從 closure 取，屬性注入在結構上不可能發生（載入端另有 date 白名單當根因防線）。
+    const allBtn = document.createElement('button');
+    allBtn.className = 'btn btn-sm';
+    allBtn.textContent = anyCollapsed ? '▾ 全部展開' : '▸ 全部收合';
+    allBtn.onclick = () => setAllDaysExpanded(dates, anyCollapsed);
+    const allHint = document.createElement('span');
+    allHint.className = 'hint';
+    allHint.style.alignSelf = 'center';
+    allHint.textContent = '點日期那一列可單獨展開／收合';
+    bar.appendChild(allBtn);
+    bar.appendChild(allHint);
     host.appendChild(bar);
   }
 
@@ -3224,7 +3282,8 @@ function setAllDaysExpanded(dates, on) {
 }
 // 🧾 拆分組收合狀態（預設收合成一行；展開的 gid 記在 localStorage，重整後保留）
 function getExpandedGids() {
-  try { const a = JSON.parse(localStorage.getItem('jp_expanded_gids') || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  // 元素白名單與 getExpandedDays 對稱（註解本來就宣稱「白名單格式」，但這裡漏做了）
+  try { const a = JSON.parse(localStorage.getItem('jp_expanded_gids') || '[]'); return Array.isArray(a) ? a.filter(validGid) : []; } catch (e) { return []; }
 }
 function isGidExpanded(gid) { return getExpandedGids().indexOf(gid) >= 0; }
 // 只保留「目前這本確實存在」的 gid（換帳本／刪組後修剪，避免這個全域 key 無限累積）
@@ -3775,6 +3834,8 @@ function resetTransientState() {
   filter = 'all'; dateFilter = 'all'; sortMode = 'date_desc'; chartMode = 'cat';
   editingId = null; editingGid = null; groupEditIds = []; toamtTouched = false;
   entryMode = 'single'; multiRows = []; splitRows = [];
+  setSplitTitle('');     // 🏷️ 拆分列清了、大標題欄沒清＝不對稱：殘留值會被 submitSplitForm 直接讀 DOM
+                         //    寫進「另一本」的資料（已實測甲本標題出現在乙本的新拆分組）
   analysisFilter = emptyAnalysisFilter();   // 帳戶 id／分類名都綁上一本，換帳本一律全清
   splitTax = { mode: 'none', rate: 8 }; singleTax = { mode: 'none', rate: 8 };
   settleCur = HOME_CUR; splitEditingId = null; _drillCtx = null; _gidCountCache = null;
@@ -3788,8 +3849,10 @@ function resetTransientState() {
   _spDraft = { amounts: Object.create(null), shares: Object.create(null), participants: [] };
   _batchModalApply = null;
   _summaryExpandedCats.clear(); _summaryExpandedPays.clear();
-  pruneExpandedGids();   // 展開中的拆分組是全域 key，修剪掉不屬於這本的殘留
-  pruneExpandedDays();   // 📅 展開中的日期同理（不同帳本日期會撞，不修剪會把新帳本的同日誤展開）
+  // 展開狀態是 UI 暫態且 key 是全域的 → 換資料集一律整組清空（沿用本函式「暫態一律清空」的紀律）。
+  // ⚠️ 原本用 prune 只剔除「新帳本沒有的」，兩本共用的日期（旅行帳本常常同一天）會存活下來，
+  //    切過去就自動展開，等於上一本的展開狀態外洩到這一本（已實測）。
+  try { localStorage.setItem('jp_expanded_gids', '[]'); localStorage.setItem('jp_expanded_days', '[]'); } catch (e) {}
 }
 function switchLedger(id, quiet) {
   const l = store.ledgers.find(x => x.id === id);
@@ -4123,6 +4186,7 @@ function sanitizeImport(d) {
     if (out.gid && gt) out.gtitle = gt; else delete out.gtitle;
     return out;
   });
+  reconcileGroupTitles(d.txns);   // 同組共用一個大標題（逐筆檢查擋不住「同 gid 不同 gtitle」的竄改）
   if (!Array.isArray(d.members)) d.members = [];
   if (!Array.isArray(d.splits)) d.splits = [];
   if (!d.categories || typeof d.categories !== 'object') d.categories = defaultData().categories;
@@ -4206,7 +4270,11 @@ function exportCSV() {
   for (const t of data.txns) {
     if (t.type === 'expense') {
       const a = acctById(t.account);
-      rows.push([t.date, '消費', t.cat || '', t.subcat || '', t.item || '', a ? a.name : '', '', t.amount, a ? a.currency : '', Math.round(toTWD(t.amount, a ? a.currency : 'JPY')), t.note || '', validGid(t.gid) ? normGTitle(t.gtitle) : '', validGid(t.gid) ? t.gid : '']);
+      // ⚠️ 口徑必須與顯示層一致：用 isGrouped()（gid 有效「且」同組 ≥2 筆），不是只驗 validGid。
+      //    2 筆組被單筆刪成 1 筆時畫面已自動退化（不顯示前綴），CSV 若仍輸出大標題／拆分組，
+      //    試算表就會看到一個只有一筆的幽靈 UNIQLO 群組。
+      const grouped = isGrouped(t);
+      rows.push([t.date, '消費', t.cat || '', t.subcat || '', t.item || '', a ? a.name : '', '', t.amount, a ? a.currency : '', Math.round(toTWD(t.amount, a ? a.currency : 'JPY')), t.note || '', grouped ? normGTitle(t.gtitle) : '', grouped ? t.gid : '']);
     } else {
       const from = acctById(t.from), to = acctById(t.to);
       rows.push([t.date, '儲值', '', '', (from ? from.name : '') + '→' + (to ? to.name : ''), from ? from.name : '', to ? to.name : '', t.amount, from ? from.currency : '', '', t.note || '', '', '']);
@@ -4906,12 +4974,30 @@ function focusSplitField(i, fld) {
   el.focus();
   try { el.select(); } catch (e) {}
 }
+// ⌨️ IME 組字中的 Enter 是「確定候選字」不是動線指令。本 App 的品項幾乎必然經中/日文輸入法打字，
+//    不擋的話「ラーメン」按下確認鍵游標就跳走了。isComposing 是標準判準，keyCode 229 是舊版瀏覽器後備。
+//    組字中一律原樣放行（不 preventDefault）：瀏覽器在組字狀態下本來就不會觸發表單隱式送出。
+function isComposingKey(e) { return !!(e && (e.isComposing || e.keyCode === 229)); }
 function onSplitKey(e, i, fld) {
-  if (!e || e.key !== 'Enter') return;
+  if (!e || e.key !== 'Enter' || isComposingKey(e)) return;
   e.preventDefault();          // 拆分列在 <form> 內，不擋會直接觸發送出
+  if (fld === 'subcat') { focusSplitField(i, 'item'); return; }   // 小項 → 同列品項（補齊動線，順序同 Tab）
   if (fld === 'item') { focusSplitField(i, 'amount'); return; }
   if (i >= splitRows.length - 1) addSplitRow();     // 最後一列 → 自動加一列並跳過去
   else focusSplitField(i + 1, 'item');
+}
+// 表單層 Enter 防護：逐欄補 onkeydown 一定會再漏（本輪就漏了 f-split-title 與拆分列的小項欄），
+//   改在 <form> 上收一次。拆分模式下 <form> 內任何 input 的 Enter 一律不觸發隱式送出 ——
+//   否則使用者只是想在小項欄換行，整組帳就被提前記下去、表單也被清空（已實測 txns 1→3）。
+//   單筆模式維持原行為（Enter 快速送出），不改既有習慣。
+function onEntryFormKey(e) {
+  if (!e || e.key !== 'Enter' || isComposingKey(e)) return;
+  const el = e.target;
+  if (!el || el.tagName !== 'INPUT' || el.type === 'submit' || el.type === 'button') return;
+  const on = document.getElementById('f-split-on');
+  if (!on || !on.checked) return;                  // 只在拆分模式生效
+  e.preventDefault();
+  if (el.id === 'f-split-title') focusSplitField(0, 'item');   // 大標題 → 第一列品項（順著填表方向）
 }
 function removeSplitRow(i) {
   splitRows.splice(i, 1);
@@ -4955,7 +5041,7 @@ function renderSplitRows() {
     const subs = (data.categories[r.cat] || []).map(s => `<option value="${escapeHtml(s)}">`).join('');
     return `<div class="split-row" data-i="${i}">` +
       `<select onchange="onSplitCat(${i},this.value)" aria-label="大項">${catOpts(r.cat)}</select>` +
-      `<input type="text" value="${escapeHtml(r.subcat)}" list="ssub-${i}" placeholder="小項" oninput="onSplitInput(${i},'subcat',this.value)" aria-label="小項"><datalist id="ssub-${i}">${subs}</datalist>` +
+      `<input type="text" value="${escapeHtml(r.subcat)}" list="ssub-${i}" placeholder="小項" oninput="onSplitInput(${i},'subcat',this.value)" onkeydown="onSplitKey(event,${i},'subcat')" aria-label="小項"><datalist id="ssub-${i}">${subs}</datalist>` +
       `<input type="text" data-fld="item" value="${escapeHtml(r.item)}" placeholder="品項/名稱" oninput="onSplitInput(${i},'item',this.value)" onkeydown="onSplitKey(event,${i},'item')" aria-label="品項">` +
       `<input type="number" data-fld="amount" inputmode="decimal" step="any" value="${escapeHtml(r.amount)}" placeholder="金額" oninput="onSplitInput(${i},'amount',this.value)" onkeydown="onSplitKey(event,${i},'amount')" aria-label="金額">` +
       `<button type="button" class="btn btn-sm btn-danger multi-del" onclick="removeSplitRow(${i})" aria-label="移除這項">✕</button>` +
@@ -5500,18 +5586,34 @@ function runGidGroupSelfTest() {
   ok(titledItem('衣服', ' UNIQLO ') === 'UNIQLO：衣服', 'titledItem：前綴自動修剪');
   ok(titledItem('', 'UNIQLO') === 'UNIQLO：', 'titledItem：空品項仍加前綴（不炸）');
   ok(titledItem(titledItem('衣服', 'UNIQLO'), '') === 'UNIQLO：衣服', 'titledItem：不重複疊加（item 存原值的前提）');
+  // ⚠️ 逐筆剝除的案例一律各自獨立 gid：與「同組一致化」是兩件事，混在同一組會互相掩蓋
+  //    （組一致化會把合法標題複製給同組其他筆，逐筆剝除就測不出來了）。
   const sdg = sanitizeImport({ ledgerName: 't', rate: 5, accounts: [{ id: 'card', currency: 'JPY' }], txns: [
     { id: 'b1', type: 'expense', amount: 1, date: '2026-07-04', gid: 'g1', gtitle: '  UNIQLO ' },
     { id: 'b2', type: 'expense', amount: 1, date: '2026-07-04', gtitle: '孤兒標題' },
-    { id: 'b3', type: 'expense', amount: 1, date: '2026-07-04', gid: 'g1', gtitle: { evil: 1 } },
-    { id: 'b4', type: 'topup', amount: 1, date: '2026-07-04', gid: 'g1', gtitle: 'X' },
-    { id: 'b5', type: 'expense', amount: 1, date: '2026-07-04', gid: 'g1', gtitle: 'あ'.repeat(60) }
+    { id: 'b3', type: 'expense', amount: 1, date: '2026-07-04', gid: 'g3', gtitle: { evil: 1 } },
+    { id: 'b4', type: 'topup', amount: 1, date: '2026-07-04', gid: 'g4', gtitle: 'X' },
+    { id: 'b5', type: 'expense', amount: 1, date: '2026-07-04', gid: 'g5', gtitle: 'あ'.repeat(60) }
   ] });
   ok(sdg.txns[0].gtitle === 'UNIQLO', 'sanitizeImport：合法 gtitle 保留並修剪');
   ok(!('gtitle' in sdg.txns[1]), 'sanitizeImport：沒有 gid 的孤兒 gtitle 剝除');
   ok(!('gtitle' in sdg.txns[2]), 'sanitizeImport：非字串 gtitle 剝除');
   ok(!('gtitle' in sdg.txns[3]), 'sanitizeImport：topup 的 gtitle 剝除（gid 已先剝）');
   ok(sdg.txns[4].gtitle.length === 40, 'sanitizeImport：超長 gtitle 截到 40 字');
+  // 同組一致化（逐筆白名單擋不住「同 gid 不同 gtitle」；匯入／備份還原都可能送進來）
+  const sdc = sanitizeImport({ ledgerName: 't', rate: 5, accounts: [{ id: 'card', currency: 'JPY' }], txns: [
+    { id: 'c1', type: 'expense', amount: 1, date: '2026-07-04', gid: 'gc', gtitle: '標題A' },
+    { id: 'c2', type: 'expense', amount: 1, date: '2026-07-04', gid: 'gc', gtitle: '標題B' },
+    { id: 'c3', type: 'expense', amount: 1, date: '2026-07-04', gid: 'gc' },
+    { id: 'c4', type: 'expense', amount: 1, date: '2026-07-04', gid: 'gd', gtitle: { evil: 1 } },
+    { id: 'c5', type: 'expense', amount: 1, date: '2026-07-04', gid: 'gd' }
+  ] });
+  ok(sdc.txns[0].gtitle === '標題A' && sdc.txns[1].gtitle === '標題A' && sdc.txns[2].gtitle === '標題A',
+    'sanitizeImport：同一 gid 一律統一成組內第一個合法標題');
+  ok(!('gtitle' in sdc.txns[3]) && !('gtitle' in sdc.txns[4]),
+    'sanitizeImport：整組都沒有合法標題 → 整組不留（不會補出孤兒標題）');
+  ok(reconcileGroupTitles([{ gid: 'z', gtitle: 'A' }, { gtitle: 'B' }]).map(t => t.gtitle).join(',') === 'A,B',
+    'reconcileGroupTitles：沒有 gid 的那筆不被組一致化波及');
 
   // preserveGid：大標題與 gid 同進退（組員單筆編輯後不能掉標題）
   const kg = preserveGid({ gid: 'g9', gtitle: ' UNIQLO ' }, { type: 'expense' });

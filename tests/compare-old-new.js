@@ -56,6 +56,18 @@ function boot(file) {
 }
 
 // 取出所有「可比對的輸出」
+// ⚠️ 比對前先把日期分組「全部展開」：新版明細預設收合，不展開的話 dom.txnlist 會恆常回報差異，
+//    這支工具就永遠是 exit 1、每個人都得靠人腦記得「這 2 個是預期的」——真正的回歸會被淹沒在裡面。
+//    展開後兩邊比的是同一種渲染狀態；舊版沒有這些函式就原樣跳過（不影響舊版取樣）。
+const EXPAND_ALL = `(function(){
+  try {
+    if (typeof setAllDaysExpanded !== 'function' || typeof data === 'undefined') return 'skip:no-fn';
+    const ds = Array.from(new Set((data.txns||[]).map(t => t.date).filter(Boolean)));
+    if (!ds.length) return 'skip:no-dates';
+    setAllDaysExpanded(ds, true);
+    return 'expanded:' + ds.length;
+  } catch (e) { return 'skip:threw:' + (e && e.message); }
+})()`;
 const PROBE = `(function(){
   const out = {};
   out.totals = computeTotals();
@@ -95,6 +107,8 @@ const PROBE = `(function(){
 })()`;
 
 const A = boot(OLD), B = boot(NEW);
+const expA = A.w.eval(EXPAND_ALL), expB = B.w.eval(EXPAND_ALL);
+console.log(`展開狀態對齊：OLD=${expA} NEW=${expB}`);
 const oldOut = JSON.parse(A.w.eval(PROBE));
 const newOut = JSON.parse(B.w.eval(PROBE));
 
