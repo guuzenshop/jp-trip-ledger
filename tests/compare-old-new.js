@@ -85,8 +85,10 @@ const A = boot(OLD), B = boot(NEW);
 const oldOut = JSON.parse(A.w.eval(PROBE));
 const newOut = JSON.parse(B.w.eval(PROBE));
 
-// 舊版沒有 byCur，僅比對共同欄位
-delete newOut.totals.byCur;
+// 多幣別之前的舊版沒有 byCur → 僅比對共同欄位。
+// 但基準若是「已有多幣別的版本」（例如拿上一個 release 比對本次修改），byCur 兩邊都在，
+// 就必須真的比對它，否則會少驗一整欄；無條件刪除還會誤報成 "object vs undefined"。
+if (!oldOut.totals || oldOut.totals.byCur === undefined) delete newOut.totals.byCur;
 
 let diffs = [];
 function walk(a, b, p) {

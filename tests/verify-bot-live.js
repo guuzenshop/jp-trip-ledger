@@ -78,5 +78,12 @@ const { parseBotCsv, normRate, rateSane } = mod.exports;
   console.log('rateSane 誤擋數                   : ' + bad);
   const pass = okMarker && okJPY && okUSD && okCount && bad === 0;
   console.log(pass ? 'RESULT: LIVE-CSV OK（H1 以即時資料實證通過）' : 'RESULT: LIVE-CSV FAIL');
-  process.exit(pass ? 0 : 1);
+  // Windows + undici keep-alive：直接 process.exit() 會在 libuv 關閉 async handle 時撞
+  // "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)"，變成「印了 OK 卻以非 0 離開」，
+  // 讓複現這支腳本的人誤判成失敗。改設 exitCode + 收掉全域 dispatcher，讓事件圈自然結束。
+  process.exitCode = pass ? 0 : 1;
+  try {
+    const d = globalThis[Symbol.for('undici.globalDispatcher.1')];
+    if (d && typeof d.close === 'function') await d.close();
+  } catch (e) {}
 })().catch(e => { console.log('FETCH/RUN ERR ' + e.message); process.exit(1); });

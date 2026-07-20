@@ -1049,8 +1049,8 @@ function cleanMap(obj, memberIds) {
   const out = Object.create(null);
   if (obj && typeof obj === 'object') {
     for (const k of Object.keys(obj)) {
-      if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
-      if (memberIds && !memberIds.has(k)) continue;
+      if (k === '__proto__') continue;              // out 為 null-proto；只有 __proto__ 不可能是合法成員 id
+      if (memberIds && !memberIds.has(k)) continue; // constructor/prototype 若真是成員 id，這道白名單自然放行
       const v = Number(obj[k]);
       if (Number.isFinite(v) && v >= 0) out[k] = v;
     }
@@ -1208,13 +1208,22 @@ function normalizeSplitData(d) {
     return { id, name };
   });
   const memberIds = new Set(d.members.map(m => m.id));
+  // 撞號（兩位成員同 id）時，第一位保留原 id、第二位重發，於是 idMap['原id']→第二位。
+  // 但 splits 裡寫的 '原id' 歷來指的是「第一位」——照著 remap 會把付款人與分攤金額
+  // 靜默搬給第二位（舊版是 first-wins，實測 git show b18f06b 確認）。
+  // 故：原 id 若仍活著（＝撞號情境），刪掉該對照回到 first-wins；
+  //     只有「原 id 已不存在」（非法字元被重發）的懸空參照才需要救援 remap。
+  for (const k of Object.keys(idMap)) if (seenM.has(k)) delete idMap[k];
   const remapId = k => { const s = String(k); return Object.prototype.hasOwnProperty.call(idMap, s) ? idMap[s] : s; };
   // 物件鍵的 remap（amounts/shares）：必須在 cleanMap 依 memberIds 過濾**之前**做
   const remapKeys = obj => {
     const out = Object.create(null);
     if (obj && typeof obj === 'object') {
       for (const k of Object.keys(obj)) {
-        if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+        // out 是 null-proto，寫入任何鍵都不會污染原型；而 constructor/prototype 是通過
+        // 成員 id 白名單的「合法」id，一併跳過會讓該成員的分攤份數靜默蒸發（結算歸零且不標記）。
+        // 只有 __proto__ 永遠不可能是合法成員 id（含底線，過不了 regex），維持跳過。
+        if (k === '__proto__') continue;
         out[remapId(k)] = obj[k];
       }
     }
@@ -1465,10 +1474,8 @@ function loadStore() {
     //    此時鏡射是過期的，不能拿來覆蓋 v3；直接放棄救援並提醒使用者。
     let wip = false;
     try { wip = localStorage.getItem(WIP_KEY) === '1'; } catch (e) {}
-    if (wip) {
-      try { localStorage.removeItem(WIP_KEY); } catch (e) {}
-      setTimeout(() => toast('上次存檔似乎被中斷（App 被系統關閉？），已以主檔為準。請確認最後一筆記錄是否還在。'), 900);
-    }
+    // 注意：旗標「不在這裡清」。必須等下方把鏡射修回與主檔一致之後才可以清，
+    //       否則使用者「只看不改」（全程沒有任何 save()）關掉再開，過期鏡射就會覆蓋主檔。
     if (!wip && legacy && typeof legacy.id === 'string') {
       const i = store.ledgers.findIndex(l => l.id === legacy.id);
       if (i >= 0) {
@@ -1480,6 +1487,34 @@ function loadStore() {
       }
     }
     if (!store.ledgers.some(l => l.id === store.activeLedgerId)) store.activeLedgerId = store.ledgers[0].id;
+    // 上次寫入被中斷（v3 已新、鏡射還舊）。光是「本次不採信鏡射」還不夠——鏡射若一直停在舊內容，
+    // 使用者只要「只看不改」關掉再開（全程沒有任何 save() 去重寫兩份），下一次載入就會把它
+    // 當成「舊版離線編輯」拿去覆蓋主檔，最後一筆永久消失。故這裡主動修復：
+    //   ① 過期鏡射可能真的含舊版離線編輯 → 先存成衝突備份（帳本頁可還原），不直接丟掉
+    //   ② 把鏡射改寫成與主檔一致 ③ 兩份一致後才可以清旗標
+    if (wip) {
+      let rescued = false;
+      try {
+        if (legacy && typeof legacy.id === 'string') {
+          const li = store.ledgers.findIndex(l => l.id === legacy.id);
+          const mirrored = normalizeLedger(legacy);
+          if (li < 0 || ledgerFingerprint(mirrored) !== ledgerFingerprint(store.ledgers[li])) {
+            const prev = readJSON('jp_trip_ledger_conflict_bak');
+            const arr = Array.isArray(prev) ? prev : (prev ? [prev] : []);
+            arr.push(mirrored);
+            while (arr.length > 5) arr.shift();
+            localStorage.setItem('jp_trip_ledger_conflict_bak', JSON.stringify(arr));
+            rescued = true;
+          }
+        }
+        const act = store.ledgers.find(l => l.id === store.activeLedgerId) || store.ledgers[0];
+        localStorage.setItem(STORE_KEY, JSON.stringify(act));   // 鏡射修回 → 下次載入不再被過期內容覆蓋
+        localStorage.removeItem(WIP_KEY);                       // 兩份已一致，旗標到這裡才可以清
+      } catch (e) {}
+      setTimeout(() => toast('上次存檔似乎被中斷（App 被系統關閉？），已以主檔為準。'
+        + (rescued ? '\n中斷前的舊版內容已存成衝突備份，可到「切換／管理帳本」還原。' : '')
+        + '\n請確認最後一筆記錄是否還在。'), 900);
+    }
     return store;
   } catch (e) {
     console.error('讀取失敗，使用預設值', e);
@@ -1500,6 +1535,14 @@ function normalizeLedgerFields(d) {
     if (!d.categories) d.categories = def.categories;
     if (!d.categories[FEE_CAT] || !Array.isArray(d.categories[FEE_CAT]) || !d.categories[FEE_CAT].length)
       d.categories[FEE_CAT] = (def.categories[FEE_CAT] || DEFAULT_FEE_TYPES).slice(); // 附加手續費分類（不覆蓋既有）
+    // 帳戶白名單（冪等）：原本只在 sanitizeImport（匯入路徑）做，但 load／v2 鏡射救援／
+    // 刪除備份還原／衝突備份還原都不經過它。account.currency 會經未逸出的 curSym() 進 innerHTML
+    // （fmt() 內就有一處），舊版匯入的惡意備份檔可藉此變成儲存型 XSS。責任移到這裡，全路徑統一。
+    d.accounts = (Array.isArray(d.accounts) ? d.accounts : []).map(a => Object.assign({}, a, {
+      currency: isValidCur(a && a.currency) ? a.currency : 'JPY',
+      initial: Number(a && a.initial) || 0,
+      color: /^#[0-9a-f]{3,8}$/i.test((a && a.color) || '') ? a.color : '#888'
+    }));
     migrateRates(d);                // 多幣別遷移：舊單一 rate → rates（冪等；日幣數值原封搬移）
     if (d.rateSource === undefined) d.rateSource = '手動設定';
     if (d.rateUpdatedAt === undefined) d.rateUpdatedAt = null;
@@ -1812,21 +1855,22 @@ function gidGroupSumText(curSums, sumTWD, hideConv) {
 // 消費稅計算（純函式）：rows=[{amount,rate}]（rate=8/10，0/缺＝不計）；mode='add'外加/'incl'內含/其他=不計
 //   外加：各稅率一筆稅額 taxLines=[{rate,base,tax}]（tax=round(base×rate%)）；gross=未稅+稅
 //   內含：金額已含稅，embedded=round(Σ(含稅−未稅))（僅資訊，不加列）；gross=preTax
-function computeSplitTax(rows, mode) {
+//   cur：稅額要在「該幣的最小單位」上取整。省略時 curMeta 回退 dp=0 ⇒ 與舊行為位元級相同。
+function computeSplitTax(rows, mode, cur) {
   const clean = (rows || []).map(r => ({ amount: Number(r.amount) || 0, rate: Number(r.rate) || 0 })).filter(r => r.amount > 0);
   const preTax = clean.reduce((s, r) => s + r.amount, 0);
   if (mode === 'add') {
     const byRate = {};
     for (const r of clean) if (r.rate > 0) byRate[r.rate] = (byRate[r.rate] || 0) + r.amount;
     const taxLines = Object.keys(byRate).map(Number).sort((a, b) => a - b)
-      .map(rate => ({ rate, base: byRate[rate], tax: Math.round(byRate[rate] * rate / 100) }));
+      .map(rate => ({ rate, base: byRate[rate], tax: roundCur(byRate[rate] * rate / 100, cur) }));
     const tax = taxLines.reduce((s, l) => s + l.tax, 0);
     return { mode: 'add', preTax, taxLines, tax, gross: preTax + tax, embedded: 0 };
   }
   if (mode === 'incl') {
     let embedded = 0;
     for (const r of clean) if (r.rate > 0) embedded += r.amount - r.amount / (1 + r.rate / 100);
-    return { mode: 'incl', preTax, taxLines: [], tax: 0, gross: preTax, embedded: Math.round(embedded) };
+    return { mode: 'incl', preTax, taxLines: [], tax: 0, gross: preTax, embedded: roundCur(embedded, cur) };
   }
   return { mode: 'none', preTax, taxLines: [], tax: 0, gross: preTax, embedded: 0 };
 }
@@ -2106,7 +2150,7 @@ function sumItemHTML(t, withCheck, ctx) {
 function fmt(amt, cur) {
   const dp = curMeta(cur).dp;
   const raw = Number(amt) || 0;
-  const n = dp > 0 ? Math.round(raw * 100) / 100 : Math.round(raw);
+  const n = roundCur(raw, cur);                     // 用 curScale 而非寫死 /100（dp=0/2 結果完全相同，另可支援未來 dp=3 幣別）
   const s = dp > 0
     ? Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     : Math.abs(n).toLocaleString('en-US');
@@ -3074,7 +3118,9 @@ function updatePreview() {
     if (from && to && from.currency !== to.currency) {
       const suggest = toCur(amt, from.currency, to.currency);
       const toInput = document.getElementById('f-toamount');
-      if (!toamtTouched && amt) toInput.value = Math.round(suggest);
+      // 用該幣的最小單位取整：整數化會讓預填值與下一行的預覽自相矛盾（$30.78 卻填 31），
+      // 而使用者不動預填直接送出就會把差額記進帳
+      if (!toamtTouched && amt) toInput.value = roundCur(suggest, to.currency);
       prev.textContent = amt ? `建議入帳 ≒ ${fmt(suggest, to.currency)}（可改）` : '';
     } else {
       prev.textContent = amt ? '同幣別，等額轉入' : '';
@@ -3103,7 +3149,8 @@ function submitForm(event) {
     if (!item) { toast('請輸入消費品項/名稱'); document.getElementById('f-item').focus(); return false; }
     // 單筆外加稅：新增時金額自動加稅（編輯不套用，避免重複加稅）
     let finalAmount = amount;
-    if (!editingId && singleTax.mode === 'add') finalAmount = computeSplitTax([{ amount, rate: singleTax.rate }], 'add').gross;
+    if (!editingId && singleTax.mode === 'add')
+      finalAmount = computeSplitTax([{ amount, rate: singleTax.rate }], 'add', (acctById(account) || {}).currency).gross;
     txn = { type: 'expense', date, account, cat, subcat, item, amount: finalAmount, note };
   } else {
     const from = document.getElementById('f-from').value;
@@ -3285,10 +3332,17 @@ function setSort(v) {
 }
 
 /* ===================== 即時匯率（台灣銀行現金匯率）===================== */
-function fetchWithTimeout(url, ms) {
+// ⚠️ 逾時必須涵蓋到「body 讀完」為止，不能只涵蓋 headers。
+//    fetch 的 promise 在 headers 到達時就 resolve，若在那裡 clearTimeout，之後 body 卡住的話
+//    res.text() 會永久 pending：降級鏈不會換下一條路徑、updateRate 的 finally 也永遠不執行，
+//    按鈕就永久卡在「更新中…」，只能重新載入頁面。故直接回傳文字，計時器活到 text() 完成。
+async function fetchTextWithTimeout(url, ms) {
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(), ms);
-  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(id));
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    return await res.text();
+  } finally { clearTimeout(id); }
 }
 // 台銀 CSV → { 幣別代碼: 1 該幣 = ? 台幣 }（純函式，?test=1 自測）
 // 取「本行賣出」區塊的第一個數字＝現金賣出：以列內的 Selling／本行賣出 標記定位，
@@ -3348,8 +3402,7 @@ async function updateRate() {
     let map = null;
     for (const route of BOT_ROUTES) {
       try {
-        const res = await fetchWithTimeout(route.url(BOT_CSV_URL), route.ms);
-        const m = parseBotCsv(await res.text());               // { USD: 32.56, JPY: 0.2025, ... }（台幣/該幣）
+        const m = parseBotCsv(await fetchTextWithTimeout(route.url(BOT_CSV_URL), route.ms));  // { USD: 32.56, JPY: 0.2025, ... }（台幣/該幣）
         if (Object.keys(m).length) { map = m; break; }
       } catch (e) { /* 換下一條路徑 */ }
     }
@@ -3373,6 +3426,7 @@ async function updateRate() {
     data.rateSource = '台銀現金賣出';
     data.rateUpdatedAt = nowStr();
     save(); render();
+    syncSettingsSnapRates();   // 已提交且已落盤 → 不可被設定 modal 的取消還原倒回舊值
     if (document.getElementById('settings-modal').classList.contains('show')) renderRateEditor();
     // 「無現金報價」與「取得值異常被擋下」要分開講，後者是 rateSane 唯一的觀測窗口
     const miss = wanted.filter(c => okCurs.indexOf(c) < 0 && skipped.indexOf(curName(c)) < 0);
@@ -3388,6 +3442,11 @@ async function updateRate() {
 let _lgPendingDel = null;          // 待確認刪除的帳本 id（inline 兩段式確認，不用原生 confirm）
 
 function openLedgerModal() {
+  // 先收掉其他 modal（比照 openSummary 的既有紀律）：疊框時切帳本，另一個 modal 的暫態
+  // 會在它關閉時被套用到「新的這一本」——標題列有 tabindex 且 modal 無 focus trap，鍵盤可達。
+  if (document.getElementById('settings-modal').classList.contains('show')) closeSettings();
+  if (document.getElementById('split-modal').classList.contains('show')) closeSplitForm();
+  if (document.getElementById('batch-modal').classList.contains('show')) closeBatchModal();
   _lgPendingDel = null;
   renderLedgerModal(); toggleLedgerAdd(false);
   document.getElementById('ledger-modal').classList.add('show');
@@ -3513,6 +3572,13 @@ function resetTransientState() {
   settleCur = HOME_CUR; splitEditingId = null; _drillCtx = null; _gidCountCache = null;
   _inlineEditId = null;  // 行內編輯指向上一本的 txn id，一併清掉
   _lgPendingDel = null;  // 帳本刪除的「武裝中」狀態不得跨資料集殘留
+  // 下面三個同樣綁定「上一本」，不清會把上一本的東西套用到新帳本：
+  //   _settingsSnap      設定 modal 的還原快照 → 關閉設定時會把上一本的帳本名/帳戶/分類/匯率整組寫進新帳本
+  //   _spDraft           分帳草稿存的是上一本的成員 id
+  //   _batchModalApply   批量 modal 的 callback 捕捉的是上一本的交易 id
+  _settingsSnap = null;
+  _spDraft = { amounts: Object.create(null), shares: Object.create(null), participants: [] };
+  _batchModalApply = null;
   _summaryExpandedCats.clear(); _summaryExpandedPays.clear();
   pruneExpandedGids();   // 展開中的拆分組是全域 key，修剪掉不屬於這本的殘留
 }
@@ -3597,6 +3663,17 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.g
 // 設定 modal 直接編輯 live data（移除帳戶、改幣別、改匯率…），若未按「儲存」就關閉，
 // 這些變更會殘留在記憶體、被下一次任何 save() 落盤 → 開啟時快照，非提交式關閉時還原。
 let _settingsSnap = null;
+// 設定 modal 開啟「期間」若有已提交並落盤的匯率更新（🔄 更新最新匯率是非同步的，
+// 12s+8s 的視窗內使用者完全來得及開設定），必須同步快照。否則之後非提交式關閉設定，
+// 會把已經成功寫進 localStorage 的新匯率倒回舊值，而使用者毫無所覺。
+function syncSettingsSnapRates() {
+  if (!_settingsSnap) return;
+  try {
+    const s = JSON.parse(_settingsSnap);
+    s.rates = data.rates; s.rateSource = data.rateSource; s.rateUpdatedAt = data.rateUpdatedAt;
+    _settingsSnap = JSON.stringify(s);
+  } catch (e) {}
+}
 function openSettings() {
   document.getElementById('s-ledger-name').value = data.ledgerName || '';
   renderRateEditor();
@@ -3604,8 +3681,11 @@ function openSettings() {
   renderAcctEditor();
   document.getElementById('s-split-enabled').checked = splitEnabled();
   document.getElementById('s-hide-rate').checked = hideRate();
+  // rateSource/rateUpdatedAt 必須跟 rates 一起快照，否則取消還原後會出現
+  //「數值是舊的、卻顯示台銀現金賣出（剛剛）」的中繼資料脫節
   _settingsSnap = JSON.stringify({
-    ledgerName: data.ledgerName, accounts: data.accounts, categories: data.categories, rates: data.rates
+    ledgerName: data.ledgerName, accounts: data.accounts, categories: data.categories, rates: data.rates,
+    rateSource: data.rateSource, rateUpdatedAt: data.rateUpdatedAt
   });
   document.getElementById('settings-modal').classList.add('show');
 }
@@ -3616,6 +3696,7 @@ function closeSettings(committed) {
       const s = JSON.parse(_settingsSnap);
       data.ledgerName = s.ledgerName; data.accounts = s.accounts;
       data.categories = s.categories; data.rates = s.rates;
+      data.rateSource = s.rateSource; data.rateUpdatedAt = s.rateUpdatedAt;
       refreshSelects(); render();
     } catch (e) {}
   }
@@ -4527,10 +4608,10 @@ function updateSingleTaxPreview() {
   if (singleTax.mode === 'none' || !amt) { pv.textContent = ''; return; }
   const conv = (v) => (cur !== 'TWD' && !hideRate()) ? `（≒ NT$${Math.round(toTWD(v, cur)).toLocaleString('en-US')}）` : '';
   if (singleTax.mode === 'add') {
-    const g = computeSplitTax([{ amount: amt, rate: singleTax.rate }], 'add').gross;
+    const g = computeSplitTax([{ amount: amt, rate: singleTax.rate }], 'add', cur).gross;
     pv.textContent = `未稅 ${fmt(amt, cur)} → 送出時自動加 ${singleTax.rate}% 稅 ＝ ${fmt(g, cur)}${conv(g)}`;
   } else {
-    const emb = computeSplitTax([{ amount: amt, rate: singleTax.rate }], 'incl').embedded;
+    const emb = computeSplitTax([{ amount: amt, rate: singleTax.rate }], 'incl', cur).embedded;
     pv.textContent = `此金額已含稅，其中含 ${singleTax.rate}% 稅約 ${fmt(emb, cur)}${conv(amt)}`;
   }
 }
@@ -4610,7 +4691,7 @@ function updateSplitSum() {
   if (pv) {
     if (splitTax.mode === 'none' || n === 0) { pv.textContent = ''; }
     else {
-      const tx = computeSplitTax(trows, splitTax.mode);
+      const tx = computeSplitTax(trows, splitTax.mode, cur);
       const conv = (v) => (cur !== 'TWD' && !hideRate()) ? `（≒ NT$${Math.round(toTWD(v, cur)).toLocaleString('en-US')}）` : '';
       pv.textContent = splitTax.mode === 'add'
         ? `未稅 ${fmt(tx.preTax, cur)} ＋ ${splitTax.rate}% 稅 ${fmt(tx.tax, cur)} ＝ 合計 ${fmt(tx.gross, cur)}${conv(tx.gross)}（送出自動加稅費列）`
@@ -4650,7 +4731,7 @@ function submitSplitForm(date, note) {
   // 外加稅：先算出各稅率的稅費列（品項保留未稅），與品項一起計入組員數 → 正確分組
   let taxDefs = [];
   if (splitTax.mode === 'add') {
-    const tx = computeSplitTax(res.valid.map(r => ({ amount: r.amount, rate: splitTax.rate })), 'add');
+    const tx = computeSplitTax(res.valid.map(r => ({ amount: r.amount, rate: splitTax.rate })), 'add', acctCur);
     taxDefs = tx.taxLines.map(l => ({ cat: TAX_CAT, subcat: `消費稅${l.rate}%`, item: `消費稅${l.rate}%（未稅 ${fmt(l.base, acctCur)}）`, amount: l.tax }));
   }
   const gid = (res.valid.length + taxDefs.length) >= 2 ? genId() : null;

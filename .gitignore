@@ -11,7 +11,8 @@
 # tests/ 內只收腳本本體；相依套件、比對用的舊版與真實資料一律不進版控
 /tests/node_modules/
 /tests/package-lock.json
-/tests/old.html
+# 比對用的舊版（old.html）、verify-live.js 下載的線上檔（live.html）等產物一律不進版控
+/tests/*.html
 /tests/*.json
 !/tests/package.json
 /tests/*.txt

@@ -20,6 +20,7 @@ Node 20+ 即可（開發時用 24.14.0、jsdom 29.1.1）。
 | `node verify-mc.js ../index.html` | 多幣別 E2E：全新安裝／舊資料遷移／三幣別／缺匯率保護；同時印出內建 `?test=1` 的案數 | 42 PASS / 0 FAIL（內建 214/0）|
 | `node verify-ledger.js ../index.html` | 多帳本 E2E：遷移／資料隔離／複製設定／暫態清空／改名封存刪除／匯入兩模式／跨 session 持久化／舊格式鏡射相容／離線舊版救援／多分頁併發／同本衝突備份與還原／暫態修剪 | 91 PASS / 0 FAIL |
 | `node verify-rate.js ../index.html` | 匯率取得降級鏈（stub fetch）：台銀可用／限流改走備援／部分幣別無報價／離譜值擋下／全失敗不動資料／無追蹤幣別不發請求 | 22 PASS / 0 FAIL |
+| `node verify-regress.js ../index.html` | **歷輪外部審查確認缺陷的回歸守護**（見檔頭 R1–R10）：WIP 中斷後鏡射修復／設定快照跨帳本污染／已落盤匯率被還原／dp=2 稅金／建議入帳／載入路徑 XSS／撞號 remap／危險成員 id／fetch 逾時涵蓋 body／fmt 取整 | 54 PASS / 0 FAIL |
 | `node compare-old-new.js <old.html> ../index.html [seed.json]` | **新舊版同資料逐欄比對**：totals／各帳戶 acctStats／chartRows(cat,sub,pay)／每筆 txnTWDValue／computeSettlement(台幣域＋日幣域)／computeTripSummary／DOM 文字 | 數字 0 差異（唯一差異為刻意文案）|
 | `node verify-bot-live.js ../index.html` | **抓即時台銀 CSV**，用上線中的 `parseBotCsv` 端到端驗證欄位定位 | LIVE-CSV OK |
 | `node verify-live.js ../index.html . <cachebuster>` | 抓 GitHub Pages 線上檔，比對與本地 md5 是否 byte-identical、特徵字串是否齊備 | LIVE OK |
@@ -37,6 +38,10 @@ node compare-old-new.js old.html ../index.html
 ## 設計說明
 
 - 每個腳本都直接讀 `index.html` 原始碼跑，不複製函式，避免「測到的不是上線那份」。
-  `verify-bot-live.js` 更是把上線中的 `parseBotCsv` 原封抽出來餵即時資料。
+  `verify-bot-live.js` 更是把上線中的 `parseBotCsv` 原封抽出來餵即時資料；
+  `verify-regress.js` 的 R9 同樣抽出上線中的 `fetchTextWithTimeout`，打一台「送完 headers 就不送 body」的本機伺服器。
 - 失敗時 exit code 非 0，可直接接 CI。
+- **回歸測試要有效，必須在「修好之前」會失敗**。`verify-regress.js` 對修復前的 `36b7b90`
+  實測 **PASS 21 / FAIL 30**（十項發現全部被抓到），對修復後則 54/0；
+  可自行複現：`git show 36b7b90:index.html > /tmp/pre.html && node verify-regress.js /tmp/pre.html`。
 - 這些腳本**不會**被 App 載入（`index.html` 完全不引用 `tests/`），純屬開發資產。
