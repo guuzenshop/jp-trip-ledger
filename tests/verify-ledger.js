@@ -106,10 +106,12 @@ scenario('L3', () => {
 scenario('L4', () => {
   const { w, logs } = boot({ jp_trip_ledger_v2: JSON.stringify(legacy) });
   const firstId = w.eval('data.id');
-  w.eval("selectedIds.add('a1'); analysisFilter={weekdays:[5],dates:['2026-07-01']}; dateFilter='2026-07-01'; sortMode='amt_desc'; settleCur='JPY'; editingId='a1';");
+  // 六維篩選（星期/日期/大項/小項/支付/幣別）：帳戶 id 與分類名都綁上一本，換帳本必須全清
+  w.eval("selectedIds.add('a1'); analysisFilter={weekdays:[5],dates:['2026-07-01'],cats:['飲食'],subs:['飲食\\u0000拉麵'],accounts:['a1'],currencies:['JPY']}; dateFilter='2026-07-01'; sortMode='amt_desc'; settleCur='JPY'; editingId='a1';");
   w.eval("openLedgerModal(); toggleLedgerAdd(true); document.getElementById('lg-new-name').value='暫態測試'; createLedgerFromForm();");
   eq(w.eval('selectedIds.size'), 0, 'L4 清 selectedIds');
-  eq(w.eval('JSON.stringify(analysisFilter)'), '{"weekdays":[],"dates":[]}', 'L4 清分析篩選');
+  eq(w.eval('JSON.stringify(analysisFilter)'), '{"weekdays":[],"dates":[],"cats":[],"subs":[],"accounts":[],"currencies":[]}', 'L4 清分析篩選（六維全清）');
+  eq(w.eval('ANALYSIS_DIMS.every(k=>Array.isArray(analysisFilter[k])&&analysisFilter[k].length===0)'), true, 'L4 分析篩選每個維度都是空陣列');
   eq(w.eval('dateFilter'), 'all', 'L4 清日期篩選');
   eq(w.eval('sortMode'), 'date_desc', 'L4 排序回預設');
   eq(w.eval('settleCur'), 'TWD', 'L4 結算幣別回台幣');

@@ -77,7 +77,20 @@ const PROBE = `(function(){
     splitList: (document.getElementById('split-list')||{textContent:''}).textContent.replace(/\\s+/g,' ').trim(),
     settleBox: (document.getElementById('settle-box')||{textContent:''}).textContent.replace(/\\s+/g,' ').trim(),
   };
-  out.csv = (typeof buildCSVRows === 'function') ? 'n/a' : 'n/a';
+  // ⚠️ 2026-07-20 修：原本寫成 (typeof buildCSVRows==='function') ? 'n/a' : 'n/a'
+  //    ——兩個分支同值，等於這個 probe 從來沒有比對過任何東西（與第五輪 M-3「靜默掉案」同類缺陷）。
+  //    改成真的攔截 exportCSV 的輸出；抓不到時明確標記 UNAVAILABLE，不得假裝比對過。
+  out.csv = (function(){
+    if (typeof exportCSV !== 'function' || typeof download !== 'function') return 'UNAVAILABLE:no-exportCSV';
+    let cap = null;
+    const orig = download;
+    try {
+      download = function(n, c){ cap = c; };
+      exportCSV();
+    } catch (e) { return 'UNAVAILABLE:threw:' + (e && e.message); }
+    finally { download = orig; }
+    return cap == null ? 'UNAVAILABLE:not-captured' : cap;
+  })();
   return JSON.stringify(out);
 })()`;
 

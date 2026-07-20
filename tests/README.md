@@ -17,11 +17,12 @@ Node 20+ 即可（開發時用 24.14.0、jsdom 29.1.1）。
 
 | 指令 | 涵蓋 | 目前結果 |
 |---|---|---|
-| `node verify-mc.js ../index.html` | 多幣別 E2E：全新安裝／舊資料遷移／三幣別／缺匯率保護；同時印出內建 `?test=1` 的案數 | 42 PASS / 0 FAIL（內建 214/0）|
-| `node verify-ledger.js ../index.html` | 多帳本 E2E：遷移／資料隔離／複製設定／暫態清空／改名封存刪除／匯入兩模式／跨 session 持久化／舊格式鏡射相容／離線舊版救援／多分頁併發／同本衝突備份與還原／暫態修剪 | 91 PASS / 0 FAIL |
+| `node verify-mc.js ../index.html` | 多幣別 E2E：全新安裝／舊資料遷移／三幣別／缺匯率保護；同時印出內建 `?test=1` 的案數 | 42 PASS / 0 FAIL（內建 257/0）|
+| `node verify-ledger.js ../index.html` | 多帳本 E2E：遷移／資料隔離／複製設定／暫態清空／改名封存刪除／匯入兩模式／跨 session 持久化／舊格式鏡射相容／離線舊版救援／多分頁併發／同本衝突備份與還原／暫態修剪 | 92 PASS / 0 FAIL |
+| `node verify-features.js ../index.html` | **2026-07-20 兩個新功能 E2E**：F1–F11 🏷️ 拆分組大標題（送出寫入／未填零回歸／退化剝除／稅費列同組／整組編輯改與清空／組解散／組員單筆編輯不掉標題／事後拆分／四處顯示層／CSV 獨立欄／竄改備份不進 DOM）；A1–A8 📊 六維自由篩選（收合預設與記憶／日幣+icoca+飲食／飲食+paypay／晶片切換與 dim 白名單／圖表與鑽取同步／摘要逸出／單幣別不顯示幣別列） | 80 PASS / 0 FAIL |
 | `node verify-rate.js ../index.html` | 匯率取得降級鏈（stub fetch）：台銀可用／限流改走備援／部分幣別無報價／離譜值擋下／全失敗不動資料／無追蹤幣別不發請求 | 22 PASS / 0 FAIL |
 | `node verify-regress.js ../index.html` | **歷輪外部審查確認缺陷的回歸守護**（見檔頭 R1–R13）：R1–R10 為第四輪（WIP 中斷後鏡射修復／設定快照跨帳本污染／已落盤匯率被還原／dp=2 稅金／建議入帳／載入路徑 XSS／撞號 remap／危險成員 id／fetch 逾時涵蓋 body／fmt 取整）；**R11–R13 為第五輪，守護「上一輪修復本身引入」的新洞**：Object.assign 對惡意 `__proto__` 鍵的原型污染／accounts 含 null 補成幽靈帳戶／WIP 反覆修復擠掉真實併發衝突備份 | 65 PASS / 0 FAIL |
-| `node compare-old-new.js <old.html> ../index.html [seed.json]` | **新舊版同資料逐欄比對**：totals／各帳戶 acctStats／chartRows(cat,sub,pay)／每筆 txnTWDValue／computeSettlement(台幣域＋日幣域)／computeTripSummary／DOM 文字 | 數字 0 差異（唯一差異為刻意文案）|
+| `node compare-old-new.js <old.html> ../index.html [seed.json]` | **新舊版同資料逐欄比對**：totals／各帳戶 acctStats／chartRows(cat,sub,pay)／每筆 txnTWDValue／computeSettlement(台幣域＋日幣域)／computeTripSummary／DOM 文字／**匯出 CSV 全文** | 數字 0 差異（對 `1b450f9` 唯一差異為 CSV 新增「大標題」欄，形狀已機械驗證）|
 | `node verify-bot-live.js ../index.html` | **抓即時台銀 CSV**，用上線中的 `parseBotCsv` 端到端驗證欄位定位 | LIVE-CSV OK |
 | `node verify-live.js ../index.html . <cachebuster>` | 抓 GitHub Pages 線上檔，比對與本地 md5 是否 byte-identical、特徵字串是否齊備 | LIVE OK |
 
@@ -45,6 +46,11 @@ node compare-old-new.js old.html ../index.html
   `36b7b90` 實測 **PASS 24 / FAIL 41**，對第五輪修復前的 `56f54e3` 實測 **PASS 57 / FAIL 8**
   （8 個失敗精準對應 R11×3／R12×3／R13×2，不多不少），對現版則 65/0；
   可自行複現：`git show <sha>:index.html > /tmp/pre.html && node verify-regress.js /tmp/pre.html`。
-- 案數不變式：檔尾 `pass + fail !== 65` 會額外標記一筆失敗，防止某案「抽取/前置失敗就靜默 return」
-  讓總案數悄悄縮水卻仍顯示全綠（這正是第五輪審查抓到的既有缺陷 R9 methodology bug）。
+  `verify-features.js`（80 案）對加功能前的 `1b450f9` 實測 **PASS 4 / FAIL 25（僅 28 案得以執行，其餘因新函式/新欄位不存在而中止）**；
+  同版對 `verify-ledger.js` 則**精準**只掛在新加的兩條六維斷言（`L4 清分析篩選（六維全清）` 與 `ANALYSIS_DIMS is not defined`），其餘 L1–L13 全過。
+- 案數不變式：`verify-regress.js` 檔尾 `pass + fail !== 65`、`verify-features.js` 檔尾 `!== 80` 會額外標記一筆失敗，
+  防止某案「抽取/前置失敗就靜默 return」讓總案數悄悄縮水卻仍顯示全綠（這正是第五輪審查抓到的既有缺陷 R9 methodology bug）。
+- ⚠️ 2026-07-20 修掉 `compare-old-new.js` 的一個**同類既有缺陷**：`out.csv` 原本寫成
+  `(typeof buildCSVRows === 'function') ? 'n/a' : 'n/a'`，兩個分支同值 ⇒ 這個 probe 從來沒有比對過任何東西。
+  現改為真的攔截 `exportCSV()` 輸出，抓不到時明確回 `UNAVAILABLE:*`（不得假裝比對過）。
 - 這些腳本**不會**被 App 載入（`index.html` 完全不引用 `tests/`），純屬開發資產。
