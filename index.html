@@ -1592,19 +1592,24 @@ function normalizeLedgerFields(d) {
     //    ⚠️ 同樣不可用 Object.assign（惡意「自有」__proto__ 鍵會觸發原型替換），用明確跳過的手動複製。
     // ⚠️ 替代 id 必須是「決定性」的，不能用 genId()（隨機）：這個函式每次載入／每次 reconcileWithDisk
     //    都會跑一遍，隨機值會讓「同一份輸入的兩次正規化」產生不同 id ⇒ ledgerFingerprint 不等 ⇒
-    //    reconcileWithDisk(1655) 誤判成多分頁衝突、每次 save 都推一份假備份，把真正的併發衝突備份
+    //    reconcileWithDisk 誤判成多分頁衝突、每次 save 都推一份假備份，把真正的併發衝突備份
     //    擠出 5 格環（＝第五輪 R13 修過的失效模式又回來）。已實測：非法 id 的舊資料在磁碟上時，
     //    隨機版連續 3 次全部誤報、假備份累積 3 份；舊版 0 次。改成由原值推導 + 索引 + 遞增計數器。
-    //    ⚠️ txn id 的持久化外部參照只有 jp_summary_hidden_items(2181，設計上即容忍過期 id)；
+    //    ⚠️ txn id 的持久化外部參照只有 jp_summary_hidden_items（見 getSummaryHiddenItems，
+    //    設計上即容忍過期 id）；
     //    splits 只參照 member id、手動排序靠陣列順序，故 id 重發不會破壞它們。
     //    ⚠️ 但「容忍過期」不等於「容忍撞號」：替代值一旦低熵（原本兩本帳本的第一筆非法 id
     //    都解出 'n0x'），配上那個全域、不分帳本的隱藏清單，就是跨帳本的狀態污染
     //    ——已實測：在 A 本隱藏該筆，切到 B 本時形狀相同的那筆也被判定為隱藏。
-    //    故把帳本識別混進替代值。⚠️ 邊界：本函式跑在 normalizeLedger 補帳本 id(1459) 之前，
+    //    故把帳本識別混進替代值。⚠️ 邊界：本函式跑在 normalizeLedger 補帳本 id 之前，
     //    只拿得到「傳入時就帶的 id」；無 id 的畸形帳本退回舊行為（那種帳本的 id 本來就會被
     //    補成隨機值、整體已非決定性，不因此更糟）。
     const _seenTxnId = new Set();
-    const _lid = String((d && d.id) || '').replace(/[^a-z0-9]/gi, '').slice(0, 8);
+    // ⚠️ 取 12 碼不是 8：genId() = Date.now().toString(36)（現階段恰為 8 碼，到 2059 年才進位）
+    //    + 5 碼亂數，取 8 等於精準地只拿到毫秒時間戳、把亂數段整個丟掉 ⇒ 同一毫秒建的兩本帳本
+    //    會撞號（UI 走不到——所有 l.id = genId() 都由使用者點擊觸發，但竄改資料構造得出）。
+    //    取 12 涵蓋亂數段；_fallbackId 輸出長度上限實測仍遠低於 32。
+    const _lid = String((d && d.id) || '').replace(/[^a-z0-9]/gi, '').slice(0, 12);
     const _fallbackId = (raw, i, k) => {
       const base = String(raw == null ? '' : raw).replace(/[^a-z0-9]/gi, '').slice(0, 16);
       // 順序講究：可辨識部分（帳本／索引／撞號計數）全排在 base 之前，
@@ -1678,7 +1683,7 @@ function reconcileWithDisk() {
           try {
             const prev = readJSON('jp_trip_ledger_conflict_bak');
             const arr = Array.isArray(prev) ? prev : (prev ? [prev] : []);
-            // 去重：與 loadStore(1533) 同一條紀律。連續且內容相同的衝突（例如正規化不穩、
+            // 去重：與 loadStore 的 conflict_bak 分支同一條紀律。連續且內容相同的衝突（例如正規化不穩、
             // 或同一份磁碟版被反覆調解）不該把 5 格環洗成重複內容，那會把真正的併發衝突擠出去。
             if (!arr.length || ledgerFingerprint(arr[arr.length - 1]) !== ledgerFingerprint(dl)) {
               arr.push(dl);
@@ -4207,10 +4212,10 @@ function sanitizeImport(d) {
   const seen = new Set();
   d.txns = (d.txns || []).map(t => {
     // 與帳本 id/gid 同一條白名單（含長度上限）。
-    // ⚠️ 這裡刻意仍用 genId()（隨機）而非載入路徑的 _fallbackId(1607，決定性）：匯入是一次性動作、
-    //    緊接著就 save() 落盤，不會像載入路徑那樣「同一份輸入被反覆正規化」，故無指紋不穩問題；
-    //    而隨機值反而天生不會跨帳本撞號。兩份規則的差異是有意的，不是漏改。
-    // ⚠️ 舊註解曾寫「t.id 無跨物件參照」——那是錯的，jp_summary_hidden_items(2181) 就是一個
+    // ⚠️ 這裡刻意仍用 genId()（隨機）而非載入路徑的 _fallbackId（見 normalizeLedgerFields，決定性）：
+    //    匯入是一次性動作、緊接著就 save() 落盤，不會像載入路徑那樣「同一份輸入被反覆正規化」，
+    //    故無指紋不穩問題；而隨機值反而天生不會跨帳本撞號。兩份規則的差異是有意的，不是漏改。
+    // ⚠️ 舊註解曾寫「t.id 無跨物件參照」——那是錯的，jp_summary_hidden_items（見 getSummaryHiddenItems）就是一個
     //    持久化的 txn id 集合（設計上容忍過期 id，但不容忍撞號）。已於第八輪更正。
     let id = /^[a-z0-9]{1,32}$/i.test(t.id || '') ? t.id : genId();
     while (seen.has(id)) id = genId(); // 去重：撞號重發直到唯一，避免拖曳/編輯誤指

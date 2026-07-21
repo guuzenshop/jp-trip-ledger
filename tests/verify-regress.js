@@ -43,8 +43,8 @@ const PLAN = {
   R14: 4, R15: 4, R16: 4, R17: 4, R18: 2, R19: 2, R20: 3, R21: 6, R22: 1,
   // 第七輪（合計 14）
   R23: 5, R24: 5, R25: 4,
-  // 第八輪（合計 9）
-  R26: 2, R27: 3, R28: 4,
+  // 第八／九輪（合計 11）
+  R26: 4, R27: 3, R28: 4,
 };
 const RAN = {};
 function _reconcile(name, want, p0, f0, threw) {
@@ -763,6 +763,33 @@ scenario('R26', () => {
   //    ——實測把 target 綁定整個拿掉，斷言 prevented 的版本 119 案全綠，完全抓不到（假守護）。
   //    污染真正吃掉的是「動線」：B 欄（金額）的 Enter 應該要新增一列，被吞掉就不會。
   eq(cross.after, cross.before + 1, 'R26-b ★★ A 欄組字不得吞掉 B 欄真實 Enter 的動線（窗須綁 target）');
+  /* ⚠️ 第九輪補：兩個 handler 的「先 preventDefault 再判斷」必須**各自**被守住。
+     第八輪只對 onSplitKey 做了 fail-open 突變、得到 118/0，就據此判定「這個不變式無法守護」
+     並刪掉斷言 —— 取樣取錯了元素：拆分列的 input 有表單層 onEntryFormKey 兜底，所以必然全綠；
+     而 #f-split-title 是 onEntryFormKey 獨佔、沒有任何兜底，換成它就造得出會紅的突變。
+     下面兩條分別釘住兩半，缺一則對應的那半可以被還原成 fail-open 而全套照過。 */
+  const title = JSON.parse(w.eval(`(function(){
+    var t = document.getElementById('f-split-title');
+    t.focus();
+    t.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+    t.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'ユニクロ'}));
+    var ev = new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});
+    t.dispatchEvent(ev);
+    return JSON.stringify({prevented: ev.defaultPrevented});
+  })()`));
+  ok(title.prevented === true,
+    'R26-c ★★ 表單層獨佔元素（f-split-title）剛組完字的 Enter 仍須擋送出（onEntryFormKey 的排序）');
+  // 直接呼叫 onSplitKey，繞開表單層兜底，讓 onSplitKey 自己的排序也單點可守
+  const direct = w.eval(`(function(){
+    var el = document.querySelector('#split-rows input[data-fld="item"]');
+    el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'x'}));
+    var ev = {key:'Enter', target:el, isComposing:false, _p:false,
+              preventDefault:function(){ this._p = true; }};
+    onSplitKey(ev, 0, 'item');
+    return ev._p;
+  })()`);
+  ok(direct === true,
+    'R26-d ★★ 直接呼叫 onSplitKey：剛組完字仍先 preventDefault（繞開表單層兜底的單點守護）');
 });
 
 scenario('R27', () => {
