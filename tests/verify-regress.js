@@ -43,6 +43,8 @@ const PLAN = {
   R14: 4, R15: 4, R16: 4, R17: 4, R18: 2, R19: 2, R20: 3, R21: 6, R22: 1,
   // 第七輪（合計 14）
   R23: 5, R24: 5, R25: 4,
+  // 第八輪（合計 9）
+  R26: 2, R27: 3, R28: 4,
 };
 const RAN = {};
 function _reconcile(name, want, p0, f0, threw) {
@@ -705,7 +707,9 @@ scenario('R25', () => {
       focus: (document.activeElement.getAttribute('data-fld')||document.activeElement.id)});
   })()`));
   eq(r.focus, 'item', 'R25-a ★★ compositionend 後的 Enter（Safari 型時序）不搬游標');
-  ok(r.prevented === false, 'R25-b ★ 該 Enter 原樣放行（交給 IME 確認候選字）');
+  // ⚠️ 第八輪更正：原本這條寫 prevented === false，等於把「fail-open」寫成了規格。
+  //    「不搬游標」與「不擋隱式送出」是兩件事，前者是 IME 的需求，後者會讓整組帳被提前記下。
+  ok(r.prevented === true, 'R25-b ★★ 該 Enter 仍必須擋住表單隱式送出（不搬游標 ≠ 不設防）');
   // 組標題選法與陣列順序無關
   const ord = (arr) => w.eval(`JSON.stringify(reconcileGroupTitles(${JSON.stringify(arr)}.map(function(x,i){
     return {gid:'go', gtitle:x, id:'o'+i};})).map(function(t){return t.gtitle;}))`);
@@ -713,6 +717,101 @@ scenario('R25', () => {
     'R25-c ★★ reconcileGroupTitles 與輸入順序無關（手動排序會改變 data.txns 實際順序）');
   // 用 ASCII 讓「字典序最小」不依賴對 CJK 碼位順序的直覺（乙 U+4E59 < 甲 U+7532，容易反直覺）
   eq(ord(['B', 'A']), JSON.stringify(['A', 'A']), 'R25-d ★ 平手時取字典序最小（決定性）');
+});
+
+/* ---- 第八輪外部審查（Cowork + Claude Code，標的 db5921f）：第七輪修復本身引入的新洞 ----
+   R26 IME 時間窗把 Enter 防護整片關掉（High，fail-open）：早退排在 preventDefault 之前，
+       於是窗內的 Enter 連擋都不擋；且時間戳是全域的，A 欄組完字會吞掉 B 欄的真實 Enter
+   R27 替代 id 低熵（兩本帳本都解出 n0x）→ 配上全域隱藏清單造成跨帳本 UI 狀態污染（Medium）
+   R28 第七輪的兩處修復（reconcileWithDisk 去重、safeDateAttr）完全沒有守護 ——
+       實測把它們各自還原，109 案全數照過，等於修了沒人看著（Medium/Low） */
+
+scenario('R26', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mk()) });
+  w.eval(`document.getElementById('f-split-on').checked=true; onSplitToggle();
+          splitRows=[{cat:'飲食',subcat:'晚餐',item:'',amount:''}]; renderSplitRows();`);
+  // ① 時間窗的「上界」。原本只有下界被釘住：把窗從 50ms 放大到 5 分鐘，109 案仍全綠 ——
+  //    因為既有那些「Enter 必須被擋」的案例從頭到尾沒派過 compositionend。撥老時間戳而非真的
+  //    等待，維持決定性、不引入 sleep。
+  const stale = JSON.parse(w.eval(`(function(){
+    var item = document.querySelector('#split-rows input[data-fld="item"]');
+    item.focus();
+    item.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'x'}));
+    _lastCompEnd = Date.now() - 1000;
+    var ev = new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});
+    item.dispatchEvent(ev);
+    return JSON.stringify({prevented: ev.defaultPrevented,
+      focus:(document.activeElement.getAttribute('data-fld')||document.activeElement.id)});
+  })()`));
+  // ⚠️ 這裡刻意「不」斷言 stale.prevented：修法把 preventDefault 提到窗判定之前後，窗已經影響不到它；
+  //    而且實測拿掉 onSplitKey 的 preventDefault 後它仍為 true（表單層 onEntryFormKey 會接手擋）
+  //    ——也就是說那條斷言我造不出任何會讓它紅的單點突變，屬裝飾性斷言，已刪。
+  //    窗被放大時真正壞掉的是「動線卡住」：組完字很久之後 Enter 仍被當成「剛組完」而不前進。
+  eq(stale.focus, 'amount', 'R26-a ★★ 窗過期後動線恢復正常（時間窗上界：放大窗會讓這條紅）');
+  // ② 跨欄位：品項欄剛用 IME 確認完，不該吞掉金額欄那個「真的想送出」的 Enter
+  const cross = JSON.parse(w.eval(`(function(){
+    var before = splitRows.length;
+    var item = document.querySelector('#split-rows input[data-fld="item"]');
+    item.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'x'}));
+    var amt = document.querySelector('#split-rows input[data-fld="amount"]');
+    amt.focus();
+    var ev = new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});
+    amt.dispatchEvent(ev);
+    return JSON.stringify({before: before, after: splitRows.length});
+  })()`));
+  // ⚠️ 這條不能斷言 prevented：修法把 preventDefault 提到窗判定之前後，跨欄位污染已經影響不到它
+  //    ——實測把 target 綁定整個拿掉，斷言 prevented 的版本 119 案全綠，完全抓不到（假守護）。
+  //    污染真正吃掉的是「動線」：B 欄（金額）的 Enter 應該要新增一列，被吞掉就不會。
+  eq(cross.after, cross.before + 1, 'R26-b ★★ A 欄組字不得吞掉 B 欄真實 Enter 的動線（窗須綁 target）');
+});
+
+scenario('R27', () => {
+  const { w } = boot({ jp_trip_ledger_v2: JSON.stringify(mk()) });
+  // ① 兩本不同帳本的「第一筆非法 id」不得解出同一個替代 id
+  const ids = JSON.parse(w.eval(`(function(){
+    var mkL = function(lid){ return {id:lid, ledgerName:lid, accounts:[], txns:[
+      {id:'!!!', type:'expense', date:'2026-07-01', amount:1}]}; };
+    var A = normalizeLedger(mkL('LA')), B = normalizeLedger(mkL('LB'));
+    return JSON.stringify({a:A.txns[0].id, b:B.txns[0].id, fmt:/^[a-z0-9]{1,32}$/i.test(A.txns[0].id)});
+  })()`));
+  ok(ids.a !== ids.b, 'R27-a ★★ 兩本帳本的替代 id 不撞號（低熵撞號＋全域隱藏清單＝跨帳本污染）');
+  ok(ids.fmt, 'R27-b 替代 id 仍符合白名單格式（否則每次載入都會被重新改寫，決定性即失效）');
+  // ② 換資料集時，綁著上一本 txn id 的隱藏清單必須一起清掉（與展開狀態同級）
+  const cleared = w.eval(`(function(){
+    localStorage.setItem('jp_summary_hidden_items', JSON.stringify(['x1']));
+    resetTransientState();
+    return localStorage.getItem('jp_summary_hidden_items');
+  })()`);
+  eq(cleared, '[]', 'R27-c ★ resetTransientState 一併清空隱藏清單（暫態一律清空，不得有漏網成員）');
+});
+
+scenario('R28', () => {
+  // ① reconcileWithDisk 推衝突備份前的去重
+  const st = { activeLedgerId: 'LA', _savedAt: 1000, ledgers: [mkL7('LA', [
+    { id: 'ok1', type: 'expense', date: '2026-07-01', account: 'jpy', amount: 1, cat: '飲食', item: 'x' }], 1000)] };
+  const { w } = boot({ jp_trip_ledger_v3: JSON.stringify(st) });
+  const r = JSON.parse(w.eval(`(function(){
+    var out=[];
+    for (var i=0;i<3;i++){
+      var disk = {activeLedgerId:'LA', _savedAt:5000+1000*i,
+                  ledgers:[JSON.parse(JSON.stringify(store.ledgers[0]))]};
+      disk.ledgers[0].txns[0].amount = 9999;            // 與記憶體「內容真的不同」→ 必然觸發衝突
+      disk.ledgers[0]._savedAt = 5000+1000*i;           // 每輪磁碟較新，但內容三輪完全相同
+      localStorage.setItem('jp_trip_ledger_v3', JSON.stringify(disk));
+      store._savedAt = 4000; data._savedAt = 4000; store.ledgers[0]._savedAt = 4000;
+      out.push(reconcileWithDisk());
+    }
+    return JSON.stringify({out:out, bak:(JSON.parse(localStorage.getItem('jp_trip_ledger_conflict_bak')||'[]')).length});
+  })()`));
+  // 前置斷言：沒有它的話，萬一衝突根本沒觸發，下一條就變成恆真（bak 恆為 0 也會過 eq(...,1)? 不會，
+  // 但「衝突沒觸發」會讓這條測試失去意義而不被察覺），故明確釘住觸發條件確實成立。
+  ok(r.out.filter(x => x === 'conflict').length >= 2, 'R28-a 前置：連續真實衝突確實被觸發（防恆真）');
+  eq(r.bak, 1, 'R28-b ★★ 內容相同的連續衝突只留 1 份（去重；否則真備份被擠出 5 格環）');
+  // ② safeDateAttr：sink 端的結構性防線（第七輪加了，但把它還原成 ${d} 時全套仍全綠＝零守護）
+  const sd = JSON.parse(w.eval(`JSON.stringify({
+    bad: safeDateAttr("2026-01-01'); alert(1); //"), good: safeDateAttr('2026-07-04')})`));
+  eq(sd.bad, '', 'R28-c ★ safeDateAttr 對非 ISO 值回空字串（三個 date sink 的防線同級）');
+  eq(sd.good, '2026-07-04', 'R28-d safeDateAttr 對合法日期原樣回傳（不誤傷正常路徑）');
 });
 
 // 總數不變式：期望總數由 PLAN 自動加總（不再有第二個需人工同步的魔數）。

@@ -21,7 +21,7 @@ Node 20+ 即可（開發時用 24.14.0、jsdom 29.1.1）。
 | `node verify-ledger.js ../index.html` | 多帳本 E2E：遷移／資料隔離／複製設定／暫態清空／改名封存刪除／匯入兩模式／跨 session 持久化／舊格式鏡射相容／離線舊版救援／多分頁併發／同本衝突備份與還原／暫態修剪 | 92 PASS / 0 FAIL |
 | `node verify-features.js ../index.html` | **2026-07-20 四個新功能 E2E**：F1–F11 🏷️ 拆分組大標題（送出寫入／未填零回歸／退化剝除／稅費列同組／整組編輯改與清空／組解散／組員單筆編輯不掉標題／事後拆分／四處顯示層／CSV 獨立欄／竄改備份不進 DOM）；A1–A8 📊 六維自由篩選（收合預設與記憶／日幣+icoca+飲食／飲食+paypay／晶片切換與 dim 白名單／圖表與鑽取同步／摘要逸出／單幣別不顯示幣別列）；**D1–D9 📅 日期分組預設收合**（預設 0 筆／單日展開收合與持久化／全部展開收合／新增後該日自動展開且可正常收回／選取模式與日期篩選強制展開且不給收合鈕／金額與自訂排序不受影響／換帳本修剪／竄改 localStorage 白名單）；**K1–K6 ⌨️ 拆分鍵盤動線**（新列沿用大項小項／品項 Enter 跳金額／末列 Enter 自動加列／中間列不加列／Enter 不誤送出表單／非 Enter 不干預） | 145 PASS / 0 FAIL |
 | `node verify-rate.js ../index.html` | 匯率取得降級鏈（stub fetch）：台銀可用／限流改走備援／部分幣別無報價／離譜值擋下／全失敗不動資料／無追蹤幣別不發請求 | 22 PASS / 0 FAIL |
-| `node verify-regress.js ../index.html` | **歷輪外部審查確認缺陷的回歸守護**（見檔頭 R1–R13）：R1–R10 為第四輪（WIP 中斷後鏡射修復／設定快照跨帳本污染／已落盤匯率被還原／dp=2 稅金／建議入帳／載入路徑 XSS／撞號 remap／危險成員 id／fetch 逾時涵蓋 body／fmt 取整）；**R11–R13 為第五輪，守護「上一輪修復本身引入」的新洞**：Object.assign 對惡意 `__proto__` 鍵的原型污染／accounts 含 null 補成幽靈帳戶／WIP 反覆修復擠掉真實併發衝突備份；**R14–R22 為第六輪**：txn.date 未淨化→「全部展開」鈕 onclick 儲存型 XSS（R14／R15 涵蓋 load、刪除備份還原、衝突備份還原三條路徑）／txn.id 未淨化→`moveTxn` 等 5 處 onclick 注入（R16，本輪自查追加，兩位審查者皆未提）／退化組 CSV 與顯示層口徑不一致（R17）／同 gid 不同 gtitle（R18）／金額排序下新增交易該日未展開（R19）／換帳本未清大標題欄與展開集合（R20）／拆分模式 Enter 觸發隱式送出＋IME 組字被當動線指令（R21）／getExpandedGids 缺元素白名單（R22）；**R23–R25 為第七輪，守護「第六輪修復本身引入」的新缺陷**：正規化用 `genId()` 產生替代 id 導致非決定性→`ledgerFingerprint` 不等→多分頁誤報衝突且假備份擠出真備份（R23）／表單層 Enter 防護只涵蓋 INPUT，`<select>`（拆分列「大項」是必經欄位）仍會觸發隱式送出（R24）／IME 只看 `isComposing` 涵蓋不到「compositionend 先發、keydown 帶 isComposing:false」的 Safari 型時序，＋`reconcileGroupTitles` 取「第一個」依賴陣列順序（R25） | 109 PASS / 0 FAIL |
+| `node verify-regress.js ../index.html` | **歷輪外部審查確認缺陷的回歸守護**（見檔頭 R1–R13）：R1–R10 為第四輪（WIP 中斷後鏡射修復／設定快照跨帳本污染／已落盤匯率被還原／dp=2 稅金／建議入帳／載入路徑 XSS／撞號 remap／危險成員 id／fetch 逾時涵蓋 body／fmt 取整）；**R11–R13 為第五輪，守護「上一輪修復本身引入」的新洞**：Object.assign 對惡意 `__proto__` 鍵的原型污染／accounts 含 null 補成幽靈帳戶／WIP 反覆修復擠掉真實併發衝突備份；**R14–R22 為第六輪**：txn.date 未淨化→「全部展開」鈕 onclick 儲存型 XSS（R14／R15 涵蓋 load、刪除備份還原、衝突備份還原三條路徑）／txn.id 未淨化→`moveTxn` 等 5 處 onclick 注入（R16，本輪自查追加，兩位審查者皆未提）／退化組 CSV 與顯示層口徑不一致（R17）／同 gid 不同 gtitle（R18）／金額排序下新增交易該日未展開（R19）／換帳本未清大標題欄與展開集合（R20）／拆分模式 Enter 觸發隱式送出＋IME 組字被當動線指令（R21）／getExpandedGids 缺元素白名單（R22）；**R23–R25 為第七輪，守護「第六輪修復本身引入」的新缺陷**：正規化用 `genId()` 產生替代 id 導致非決定性→`ledgerFingerprint` 不等→多分頁誤報衝突且假備份擠出真備份（R23）／表單層 Enter 防護只涵蓋 INPUT，`<select>`（拆分列「大項」是必經欄位）仍會觸發隱式送出（R24）／IME 只看 `isComposing` 涵蓋不到「compositionend 先發、keydown 帶 isComposing:false」的 Safari 型時序，＋`reconcileGroupTitles` 取「第一個」依賴陣列順序（R25）；**R26–R28 為第八輪，守護「第七輪修復本身引入」的新洞**：IME 時間窗把 Enter 防護整片關掉（早退排在 `preventDefault` 之前＝fail-open；且時間戳為全域，A 欄組完字會吞掉 B 欄的真實 Enter）——同時把 R25-b 由「原樣放行」更正為「仍須擋住送出」，原寫法等於把 fail-open 寫成規格（R26）／替代 id 低熵致兩本帳本都解出 `n0x`，配上全域隱藏清單造成跨帳本 UI 狀態污染（R27）／第七輪的 `reconcileWithDisk` 去重與 `safeDateAttr` 兩處修復**完全沒有守護**，把它們各自還原時 109 案仍全綠（R28） | 118 PASS / 0 FAIL |
 | `node compare-old-new.js <old.html> ../index.html [seed.json]` | **新舊版同資料逐欄比對**：totals／各帳戶 acctStats／chartRows(cat,sub,pay)／每筆 txnTWDValue／computeSettlement(台幣域＋日幣域)／computeTripSummary／DOM 文字／**匯出 CSV 全文** | 數字 0 差異（對 `1b450f9` 唯一差異為 CSV 新增「大標題」欄，形狀已機械驗證）|
 | `node verify-bot-live.js ../index.html` | **抓即時台銀 CSV**，用上線中的 `parseBotCsv` 端到端驗證欄位定位 | LIVE-CSV OK |
 | `node verify-live.js ../index.html . <cachebuster>` | 抓 GitHub Pages 線上檔，比對與本地 md5 是否 byte-identical、特徵字串是否齊備 | LIVE OK |
@@ -49,11 +49,26 @@ node compare-old-new.js old.html ../index.html
 
   | 腳本 | 基準版 | 實測 | 說明 |
   |---|---|---|---|
-  | `verify-regress.js`（109 案）| `e23d7b7` 第七輪修復前 | **99 / 10** | 失敗**全部**落在 R23–R25（R23×3、R24×3、R25×4），**R1–R22 對該版仍全過** |
-  | | `8351c5e` 第六輪修復前 | **77 / 32** | |
-  | | `56f54e3` 第五輪修復前 | **71 / 38** | |
-  | | `36b7b90` 第四輪修復前 | **37 / 72** | |
-  | | 現版 | **109 / 0** | |
+  | `verify-regress.js`（118 案）| `db5921f` 第八輪修復前 | **114 / 4** | 失敗**全部**落在 R25-b／R26-b／R27-a／R27-c，**R1–R24 對該版仍全過** |
+  | | `e23d7b7` 第七輪修復前 | **105 / 13** | 含 `R28 THREW: safeDateAttr is not defined`（該函式第七輪才加入，未執行的 2 條由 PLAN **整批記 fail**，非靜默略過）|
+  | | `8351c5e` 第六輪修復前 | **81 / 37** | |
+  | | `56f54e3` 第五輪修復前 | **72 / 46** | |
+  | | `36b7b90` 第四輪修復前 | **38 / 80** | |
+  | | 現版 | **118 / 0** | |
+
+  ⚠️ **2026-07-21 全表重測**：腳本由 109 案增為 118 案，舊表的 99/10、77/32、71/38、37/72
+  全部失效，已用定版後的腳本逐一重跑取代（沿用 `8351c5e` 的教訓：基準數字必須在腳本定版之後才測）。
+
+  **第八輪新守護的突變驗收**（證明不是假守護；每個突變只動 scratchpad 副本，各自只打紅一條）：
+
+  | 把哪個修復還原 | 應紅 | 實測 |
+  |---|---|---|
+  | IME 時間窗 50ms → 5 分鐘 | R26-a | ✅ 只有 R26-a |
+  | 時間窗解除 `e.target` 綁定 | R26-b | ✅ 只有 R26-b |
+  | 替代 id 拿掉帳本識別 | R27-a | ✅ 只有 R27-a |
+  | `reconcileWithDisk` 去重還原 | R28-b | ✅ 只有 R28-b |
+  | `safeDateAttr` 改為原樣回傳 | R28-c | ✅ 只有 R28-c |
+  | `onSplitKey` 拿掉 `preventDefault` | （無）| 📝 118/0 —— 表單層 `onEntryFormKey` 會接手擋，故此處無獨立守護；原本想加的「stale 仍 prevented」斷言因此**造不出會紅的突變**，已判定為裝飾性斷言並刪除 |
   | `verify-features.js`（145 案）| `1b450f9` F/A 兩功能之前 | **25 / 120** | |
   | | `869a073` D/K 兩功能之前 | **101 / 44** | 失敗全落 D/K，**F/A 系列 80 案零失敗** |
   | `verify-ledger.js` | `1b450f9` | **84 / 2** | 精準只掛新加的兩條六維斷言 |

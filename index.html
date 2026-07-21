@@ -1595,12 +1595,21 @@ function normalizeLedgerFields(d) {
     //    reconcileWithDisk(1655) 誤判成多分頁衝突、每次 save 都推一份假備份，把真正的併發衝突備份
     //    擠出 5 格環（＝第五輪 R13 修過的失效模式又回來）。已實測：非法 id 的舊資料在磁碟上時，
     //    隨機版連續 3 次全部誤報、假備份累積 3 份；舊版 0 次。改成由原值推導 + 索引 + 遞增計數器。
-    //    ⚠️ txn id 的持久化外部參照只有 jp_summary_hidden_items(2151，設計上即容忍過期 id)；
+    //    ⚠️ txn id 的持久化外部參照只有 jp_summary_hidden_items(2181，設計上即容忍過期 id)；
     //    splits 只參照 member id、手動排序靠陣列順序，故 id 重發不會破壞它們。
+    //    ⚠️ 但「容忍過期」不等於「容忍撞號」：替代值一旦低熵（原本兩本帳本的第一筆非法 id
+    //    都解出 'n0x'），配上那個全域、不分帳本的隱藏清單，就是跨帳本的狀態污染
+    //    ——已實測：在 A 本隱藏該筆，切到 B 本時形狀相同的那筆也被判定為隱藏。
+    //    故把帳本識別混進替代值。⚠️ 邊界：本函式跑在 normalizeLedger 補帳本 id(1459) 之前，
+    //    只拿得到「傳入時就帶的 id」；無 id 的畸形帳本退回舊行為（那種帳本的 id 本來就會被
+    //    補成隨機值、整體已非決定性，不因此更糟）。
     const _seenTxnId = new Set();
+    const _lid = String((d && d.id) || '').replace(/[^a-z0-9]/gi, '').slice(0, 8);
     const _fallbackId = (raw, i, k) => {
       const base = String(raw == null ? '' : raw).replace(/[^a-z0-9]/gi, '').slice(0, 16);
-      return ('n' + i + (k ? 'd' + k : '') + (base || 'x')).slice(0, 32);
+      // 順序講究：可辨識部分（帳本／索引／撞號計數）全排在 base 之前，
+      // 32 字元上限只會削掉 base 的尾巴，k 永遠不會被截掉 ⇒ 撞號迴圈保證收斂。
+      return ('n' + _lid + i + (k ? 'd' + k : '') + (base || 'x')).slice(0, 32);
     };
     d.txns = (Array.isArray(d.txns) ? d.txns : [])
       .filter(t => t && typeof t === 'object')
@@ -3871,10 +3880,15 @@ function resetTransientState() {
   _spDraft = { amounts: Object.create(null), shares: Object.create(null), participants: [] };
   _batchModalApply = null;
   _summaryExpandedCats.clear(); _summaryExpandedPays.clear();
-  // 展開狀態是 UI 暫態且 key 是全域的 → 換資料集一律整組清空（沿用本函式「暫態一律清空」的紀律）。
+  // 展開狀態與「明細入鏡勾選」都是 UI 暫態且 key 是全域的 → 換資料集一律整組清空
+  // （沿用本函式「暫態一律清空」的紀律）。
   // ⚠️ 原本用 prune 只剔除「新帳本沒有的」，兩本共用的日期（旅行帳本常常同一天）會存活下來，
   //    切過去就自動展開，等於上一本的展開狀態外洩到這一本（已實測）。
-  try { localStorage.setItem('jp_expanded_gids', '[]'); localStorage.setItem('jp_expanded_days', '[]'); } catch (e) {}
+  // ⚠️ jp_summary_hidden_items 過去漏在這份清單外：它同樣是全域、同樣綁上一本的 txn id。
+  //    根因（替代 id 跨帳本撞號）已在 1607 修掉，這裡是同級的第二道防線 —— 本函式自陳的紀律
+  //    是「暫態一律清空」，少一個成員就是不對稱，而不對稱正是上一輪出事的形狀。
+  try { localStorage.setItem('jp_expanded_gids', '[]'); localStorage.setItem('jp_expanded_days', '[]');
+        localStorage.setItem('jp_summary_hidden_items', '[]'); } catch (e) {}
 }
 function switchLedger(id, quiet) {
   const l = store.ledgers.find(x => x.id === id);
@@ -4192,7 +4206,12 @@ function sanitizeImport(d) {
     color: /^#[0-9a-f]{3,8}$/i.test(a.color || '') ? a.color : '#888' }));
   const seen = new Set();
   d.txns = (d.txns || []).map(t => {
-    // 與帳本 id/gid 同一條白名單（含長度上限）；t.id 無跨物件參照，重發不影響其他資料
+    // 與帳本 id/gid 同一條白名單（含長度上限）。
+    // ⚠️ 這裡刻意仍用 genId()（隨機）而非載入路徑的 _fallbackId(1607，決定性）：匯入是一次性動作、
+    //    緊接著就 save() 落盤，不會像載入路徑那樣「同一份輸入被反覆正規化」，故無指紋不穩問題；
+    //    而隨機值反而天生不會跨帳本撞號。兩份規則的差異是有意的，不是漏改。
+    // ⚠️ 舊註解曾寫「t.id 無跨物件參照」——那是錯的，jp_summary_hidden_items(2181) 就是一個
+    //    持久化的 txn id 集合（設計上容忍過期 id，但不容忍撞號）。已於第八輪更正。
     let id = /^[a-z0-9]{1,32}$/i.test(t.id || '') ? t.id : genId();
     while (seen.has(id)) id = genId(); // 去重：撞號重發直到唯一，避免拖曳/編輯誤指
     seen.add(id);
@@ -5006,15 +5025,26 @@ function focusSplitField(i, fld) {
 //    ⚠️ 兩種 IME 時序都要涵蓋：(a) 組字中的 keydown 帶 isComposing / keyCode 229；
 //    (b) Safari 與部分 IME 是「compositionend 先發、隨後 keydown 帶 isComposing:false」——
 //    只看 (a) 的話，(b) 這條時序下確認候選字的 Enter 仍會被當成動線指令（已實測）。用時間窗涵蓋 (b)。
-let _lastCompEnd = 0;
-try { document.addEventListener('compositionend', () => { _lastCompEnd = Date.now(); }, true); } catch (e) {}
-function isComposingKey(e) {
-  if (e && (e.isComposing || e.keyCode === 229)) return true;
-  return (Date.now() - _lastCompEnd) < 50;
+//    ⚠️⚠️ 時間窗只能決定「要不要搬游標」，絕不能決定「要不要擋隱式送出」：
+//    第七輪把兩者綁在同一個早退上，於是窗內的 Enter 連 e.preventDefault() 都不會跑，
+//    等於把第六輪才修好的 R21/R24 防護在窗內整片關掉（fail-open）。已實測，且對 e23d7b7 雙基準確認
+//    是本輪引入：同欄位（IME 確認候選字那一下）與跨欄位（另一欄的真實 Enter）都不再被擋。
+//    故拆成兩個判定，且「剛組完」要綁 e.target，否則 A 欄組完字會吞掉 B 欄的真實 Enter。
+let _lastCompEnd = 0, _lastCompTarget = null;
+try { document.addEventListener('compositionend', (e) => {
+  _lastCompEnd = Date.now(); _lastCompTarget = e && e.target;
+}, true); } catch (e) {}
+// 真的在組字中 → 交給 IME，原樣放行（瀏覽器在組字狀態下本來就不會隱式送出）
+function isComposingKey(e) { return !!(e && (e.isComposing || e.keyCode === 229)); }
+// 剛用 IME 確認完候選字 → 仍必須擋住隱式送出，只是不該把游標搬走。
+// 取不到 target 時一律回 false（寧可游標跳走這種惱人小事，也不要再退回 fail-open）。
+function isJustComposed(e) {
+  return (Date.now() - _lastCompEnd) < 50 && !!_lastCompTarget && _lastCompTarget === (e && e.target);
 }
 function onSplitKey(e, i, fld) {
   if (!e || e.key !== 'Enter' || isComposingKey(e)) return;
   e.preventDefault();          // 拆分列在 <form> 內，不擋會直接觸發送出
+  if (isJustComposed(e)) return;   // 剛確認候選字：擋住送出就好，不把游標搬到下一格
   if (fld === 'subcat') { focusSplitField(i, 'item'); return; }   // 小項 → 同列品項（補齊動線，順序同 Tab）
   if (fld === 'item') { focusSplitField(i, 'amount'); return; }
   if (i >= splitRows.length - 1) addSplitRow();     // 最後一列 → 自動加一列並跳過去
@@ -5035,6 +5065,7 @@ function onEntryFormKey(e) {
   const on = document.getElementById('f-split-on');
   if (!on || !on.checked) return;                  // 只在拆分模式生效
   e.preventDefault();
+  if (isJustComposed(e)) return;                   // 同 onSplitKey：擋送出但不搬游標
   if (el.id === 'f-split-title') focusSplitField(0, 'item');   // 大標題 → 第一列品項（順著填表方向）
 }
 function removeSplitRow(i) {
