@@ -14,7 +14,7 @@ const eq = (a, b, n) => ok(a === b, `${n} [got=${JSON.stringify(a)} want=${JSON.
 const PLAN = {
   S1: 3, S2: 2, S3: 2, S4: 2, S5: 5, S6: 2,          // 選取/全選/批量刪除 小計 16
   C1: 7, C2: 3, C3: 8,                                // 只清除明細 / 開新帳本 小計 18
-  R1: 3, R2: 2, R3: 2, R4: 2, R5: 3, R6: 2,          // 帳戶拖曳排序 小計 14
+  R1: 3, R2: 2, R3: 2, R4: 2, R5: 3, R6: 2, R7: 2,   // 帳戶拖曳排序 小計 16
 };
 const RAN = {};
 function scenario(name, fn) {
@@ -257,6 +257,17 @@ scenario('R6', () => {
   const mirror = JSON.parse(w.eval("localStorage.getItem('jp_trip_ledger_v2')"));
   eq(JSON.stringify(mirror.accounts.map(a => a.id)), JSON.stringify(rev), 'R6 儲存後鏡射保留新順序');
   eq(mirror.accounts.length, 3, 'R6 鏡射帳戶數正確');
+  w.close();
+});
+
+/* R7: enableAcctReorder 只綁一次（#acct-editor 常駐元素）—— 多次重繪不累積 handler，commit 仍正常 */
+scenario('R7', () => {
+  const { w } = boot();
+  w.eval('renderAcctEditor(); renderAcctEditor(); renderAcctEditor();');
+  ok(w.eval("document.getElementById('acct-editor')._acctReorderBound === true"), 'R7 只綁一次守衛');
+  const rev = JSON.parse(w.eval('JSON.stringify(data.accounts.map(a=>a.id))')).reverse();
+  w.eval('commitAcctOrder(' + JSON.stringify(rev) + ');');
+  eq(w.eval('JSON.stringify(data.accounts.map(a=>a.id))'), JSON.stringify(rev), 'R7 多次重繪後 commit 仍正常');
   w.close();
 });
 

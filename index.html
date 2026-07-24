@@ -4140,16 +4140,21 @@ function moveAccount(i, dir) {
   [data.accounts[i], data.accounts[j]] = [data.accounts[j], data.accounts[i]];
   renderAcctEditor();
 }
-// 帳戶編輯器：按住 ⠿ 直接拖曳排序（Pointer Events，觸控＋滑鼠通用；沿用明細清單 enableRowReorder 的模式）
+// 帳戶編輯器：按住 ⠿ 直接拖曳排序（Pointer Events，觸控＋滑鼠通用）。
+// ⚠️ #acct-editor 是常駐元素（renderAcctEditor 只換 innerHTML），故用「事件委派＋只綁一次」：
+//    否則每次重繪都對同一元素 addEventListener 會累積死 handler（明細清單 enableRowReorder 的 listEl
+//    是每次新建的 div 才沒這問題）。pointerdown 委派到 .drag-handle，拖曳狀態存單一 closure。
 function enableAcctReorder(listEl) {
+  if (listEl._acctReorderBound) return;
+  listEl._acctReorderBound = true;
   let dragEl = null, moved = false;
-  listEl.querySelectorAll('.drag-handle').forEach(handle => {
-    handle.addEventListener('pointerdown', e => {
-      e.preventDefault();
-      dragEl = handle.closest('.acct-edit');
-      moved = false;
-      if (dragEl) { dragEl.classList.add('dragging'); try { handle.setPointerCapture(e.pointerId); } catch (_) {} }
-    });
+  listEl.addEventListener('pointerdown', e => {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle || !listEl.contains(handle)) return;
+    e.preventDefault();
+    dragEl = handle.closest('.acct-edit');
+    moved = false;
+    if (dragEl) { dragEl.classList.add('dragging'); try { handle.setPointerCapture(e.pointerId); } catch (_) {} }
   });
   listEl.addEventListener('pointermove', e => {
     if (!dragEl) return;
