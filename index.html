@@ -836,9 +836,11 @@
         <button class="btn btn-sm" onclick="exportCSV()">📊 匯出 CSV(Excel)</button>
         <button class="btn btn-sm" onclick="openSummary()">📋 旅程總結</button>
         <button class="btn btn-sm" onclick="restoreAutobak()">♻️ 還原上次自動備份</button>
+        <button class="btn btn-sm" onclick="newLedgerFromCurrentSettings()">✨ 用目前設定開新帳本</button>
+        <button class="btn btn-sm btn-danger" onclick="clearEntriesOnly()">🧹 只清除明細（留設定）</button>
         <button class="btn btn-sm btn-danger" onclick="clearAll()">🗑️ 清除全部</button>
       </div>
-      <div class="hint" style="margin-top:8px">⚠️ 資料存在這台裝置的瀏覽器中，清除瀏覽器資料會遺失，請定期匯出備份。<br>📱 iPhone（Safari）請「加到主畫面」使用，否則 7 天未開可能被系統自動清除；Brave 若開「離開時清除資料」也會清掉，旅途中請養成匯出習慣。</div>
+      <div class="hint" style="margin-top:8px">🧹 <b>只清除明細</b>＝清空本帳本的消費／儲值記錄，但<b>保留</b>帳戶與消費分類；✨ <b>用目前設定開新帳本</b>＝另開一本沿用帳戶／分類（餘額歸零），舊帳本原封保留；🗑️ <b>清除全部</b>＝連帳戶與分類都回到預設。<br>⚠️ 資料存在這台裝置的瀏覽器中，清除瀏覽器資料會遺失，請定期匯出備份。<br>📱 iPhone（Safari）請「加到主畫面」使用，否則 7 天未開可能被系統自動清除；Brave 若開「離開時清除資料」也會清掉，旅途中請養成匯出習慣。</div>
     </div>
 
     <div class="row-end">
@@ -3127,13 +3129,19 @@ function enableRowReorder(listEl) {
   listEl.addEventListener('pointercancel', end);
 }
 
+// 目前篩選（類型 + 日期）下實際會顯示的交易 —— renderTxns 與「全選」共用同一份定義，
+// 避免兩處篩選邏輯漂移，導致「全選」選到畫面上根本看不到的筆。
+function visibleTxns() {
+  let t = [...data.txns];
+  if (filter !== 'all') t = t.filter(x => x.type === filter);
+  if (dateFilter !== 'all') t = t.filter(x => x.date === dateFilter);
+  return t;
+}
 function renderTxns() {
   const host = document.getElementById('txn-list');
   host.classList.toggle('selecting', selectMode);
   host.innerHTML = '';
-  let txns = [...data.txns];
-  if (filter !== 'all') txns = txns.filter(t => t.type === filter);
-  if (dateFilter !== 'all') txns = txns.filter(t => t.date === dateFilter);
+  let txns = visibleTxns();
   document.getElementById('count-line').textContent =
     `${txns.length} 筆${dateFilter !== 'all' ? '（' + fullDate(dateFilter) + '）' : ''}`;
 
@@ -4338,6 +4346,31 @@ function clearAll() {
   replaceActiveLedger(defaultData());
   resetTransientState(); save(); refreshSelects(); render(); closeSettings(true);
 }
+// 只清除明細（保留帳戶／消費分類／匯率／同行成員）—— 給「同一本要重開一趟新旅程」用。
+// 只動目前這本的 txns / splits（皆為本趟交易資料）；設定欄位一律不碰，其他帳本不受影響。
+function clearEntriesOnly() {
+  const nm = data.ledgerName || '這本';
+  const cnt = (data.txns || []).length;
+  const sc = (data.splits || []).length;
+  if (cnt === 0 && sc === 0) { toast('目前沒有任何明細可清除'); return; }
+  if (!confirm(`🧹 這會清除「${nm}」的全部 ${cnt} 筆明細${sc ? `與 ${sc} 筆分帳費用` : ''}，但保留帳戶、消費分類、匯率與同行成員設定（其他帳本不受影響）。建議先匯出備份。確定清除？`)) return;
+  if (!confirm('再次確認：真的要刪除這本帳本的所有明細嗎？此動作無法復原。')) return;
+  data.txns = [];
+  data.splits = [];
+  resetTransientState(); save(); refreshSelects(); render(); closeSettings(true);
+  toast('已清除明細，帳戶與分類設定已保留');
+}
+// 一鍵開「沿用目前設定」的新帳本：把既有的「新增帳本 → 複製設定」入口做得好找。
+// 收掉設定 modal → 開帳本 modal → 展開新增表單並預選「複製目前這本的設定」。
+function newLedgerFromCurrentSettings() {
+  closeSettings(true);
+  openLedgerModal();
+  toggleLedgerAdd(true);
+  const copy = document.querySelector('input[name="lgnew"][value="copy"]');
+  if (copy) copy.checked = true;
+  const nameEl = document.getElementById('lg-new-name');
+  if (nameEl) { nameEl.value = ''; nameEl.focus(); }
+}
 
 /* ===================== 工具 ===================== */
 function today() { const d = new Date(); const tz = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return tz.toISOString().slice(0, 10); }
@@ -5363,6 +5396,11 @@ function toggleRowSelect(id) {
   renderBatchBar();
 }
 function clearSelection() { selectedIds.clear(); renderTxns(); renderBatchBar(); }
+// 全選：把目前篩選（類型／日期）下看得到的每一筆都納入選取（範圍與明細清單顯示一致）
+function selectAllVisible() {
+  for (const t of visibleTxns()) selectedIds.add(t.id);
+  renderTxns(); renderBatchBar();
+}
 // 換掉整個 data（匯入/還原/清除）時呼叫：徹底退出選取模式並清暫態，避免殘留過期 selectedIds
 function exitSelectMode() {
   selectMode = false;
@@ -5375,26 +5413,34 @@ function exitSelectMode() {
 function renderBatchBar() {
   const bar = document.getElementById('batch-bar');
   if (!bar) return;
-  if (!selectMode || selectedIds.size === 0) {
+  // 選取模式一律顯示浮動列（含「全選」），即使還沒勾任何一筆 —— 否則使用者找不到批量入口
+  if (!selectMode) {
     bar.className = 'batch-bar'; bar.innerHTML = '';
     document.body.classList.remove('has-batch-bar');
     return;
   }
   const sel = selectedTxns();
-  const allExpense = sel.length > 0 && sel.every(t => t.type === 'expense');
-  const allTopup = sel.length > 0 && sel.every(t => t.type === 'topup');
-  let btns = `<button class="btn btn-sm" onclick="batchSetDate()">改日期</button>`;
-  if (allExpense) {
-    btns += `<button class="btn btn-sm" onclick="batchSetAccount()">改帳戶</button>`;
-    btns += `<button class="btn btn-sm" onclick="batchSetCategory()">改分類</button>`;
-  } else if (allTopup) {
-    btns += `<button class="btn btn-sm" onclick="batchSetTopupAcct('from')">改扣款</button>`;
-    btns += `<button class="btn btn-sm" onclick="batchSetTopupAcct('to')">改入賬</button>`;
-    btns += `<button class="btn btn-sm" onclick="batchSwapTopup()">對調方向</button>`;
+  const n = sel.length;
+  const allExpense = n > 0 && sel.every(t => t.type === 'expense');
+  const allTopup = n > 0 && sel.every(t => t.type === 'topup');
+  // 全選一律可用；選到 ≥1 筆才長出「全不選」與各批量操作（改…／刪除）
+  let btns = `<button class="btn btn-sm" onclick="selectAllVisible()">全選</button>`;
+  if (n > 0) {
+    btns += `<button class="btn btn-sm" onclick="clearSelection()">全不選</button>`;
+    btns += `<button class="btn btn-sm" onclick="batchSetDate()">改日期</button>`;
+    if (allExpense) {
+      btns += `<button class="btn btn-sm" onclick="batchSetAccount()">改帳戶</button>`;
+      btns += `<button class="btn btn-sm" onclick="batchSetCategory()">改分類</button>`;
+    } else if (allTopup) {
+      btns += `<button class="btn btn-sm" onclick="batchSetTopupAcct('from')">改扣款</button>`;
+      btns += `<button class="btn btn-sm" onclick="batchSetTopupAcct('to')">改入賬</button>`;
+      btns += `<button class="btn btn-sm" onclick="batchSwapTopup()">對調方向</button>`;
+    }
+    btns += `<button class="btn btn-sm btn-danger" onclick="batchDelete()">刪除</button>`;
   }
-  btns += `<button class="btn btn-sm btn-danger" onclick="batchDelete()">刪除</button>`;
-  bar.innerHTML = `<span class="bb-count">已選 ${selectedIds.size} 筆</span>${btns}` +
-    `<span style="flex:1"></span><button class="btn btn-sm" onclick="clearSelection()">完成</button>`;
+  const label = n > 0 ? `已選 ${n} 筆` : '點筆數勾選，或按「全選」';
+  bar.innerHTML = `<span class="bb-count">${label}</span>${btns}` +
+    `<span style="flex:1"></span><button class="btn btn-sm" onclick="exitSelectMode()">完成</button>`;
   bar.className = 'batch-bar show';
   document.body.classList.add('has-batch-bar');
 }
