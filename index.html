@@ -206,6 +206,8 @@
   .acct-reorder .btn { padding:5px 7px; font-size:12px; line-height:1; }
   .acct-reorder .btn:disabled { opacity:.35; cursor:default; }
   .acct-edit input,.acct-edit select { padding:7px 8px; font-size:13px; }
+  .acct-reorder .drag-handle { cursor:grab; color:var(--muted); font-size:16px; line-height:1; padding:2px 4px; touch-action:none; user-select:none; display:flex; align-items:center; }
+  .acct-edit.dragging { opacity:.65; background:var(--panel2); border-radius:8px; }
   .modal-section { border-top:1px solid var(--line); margin-top:18px; padding-top:16px; }
   .modal-section h3 { font-size:14px; margin:0 0 10px; color:var(--muted); }
   .row-end { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
@@ -819,7 +821,7 @@
       <h3>帳戶管理</h3>
       <div id="acct-editor"></div>
       <button class="btn btn-sm" onclick="addAccountRow()" style="margin-top:8px">＋ 新增帳戶</button>
-      <div class="hint" style="margin-top:6px">「初始」＝旅程開始時這個帳戶原有的錢。「類型」：儲值卡＝顯示餘額；信用卡＝顯示累計已刷。</div>
+      <div class="hint" style="margin-top:6px">按住 <b>⠿</b> 可直接拖曳排序（或用 ▲▼ 一格一格移動）。「初始」＝旅程開始時這個帳戶原有的錢。「類型」：儲值卡＝顯示餘額；信用卡＝顯示累計已刷。</div>
     </div>
 
     <div class="modal-section">
@@ -4098,6 +4100,7 @@ function renderAcctEditor() {
   data.accounts.forEach((a, i) => {
     const row = document.createElement('div');
     row.className = 'acct-edit';
+    row.dataset.id = a.id;                 // 拖曳排序 drop 後靠 id 還原順序（用 dataset 設定、不進 HTML＝零注入面）
     row.innerHTML = `
       <input type="text" value="${escapeHtml(a.name)}" data-i="${i}" data-k="name" placeholder="名稱" />
       <select data-i="${i}" data-k="currency">
@@ -4109,12 +4112,14 @@ function renderAcctEditor() {
       </select>
       <input type="number" value="${escapeHtml(a.initial)}" data-i="${i}" data-k="initial" placeholder="初始" title="初始/原有金額" />
       <div class="acct-reorder">
+        <div class="drag-handle" title="按住拖曳排序" aria-label="拖曳排序此帳戶">⠿</div>
         <button class="btn btn-sm" title="上移一格（改變餘額卡顯示順序）" aria-label="上移一格" onclick="moveAccount(${i},-1)" ${i === 0 ? 'disabled' : ''}>▲</button>
         <button class="btn btn-sm" title="下移一格（改變餘額卡顯示順序）" aria-label="下移一格" onclick="moveAccount(${i},1)" ${i === data.accounts.length - 1 ? 'disabled' : ''}>▼</button>
         <button class="btn btn-sm btn-danger" title="移除帳戶" aria-label="移除帳戶" onclick="removeAccount(${i})">✕</button>
       </div>`;
     el.appendChild(row);
   });
+  enableAcctReorder(el);
 }
 // 讀回帳戶編輯器中目前輸入的值到 data.accounts（重繪前先保存未存的編輯，避免遺失）
 function flushAcctEditorInputs() {
@@ -4133,6 +4138,52 @@ function moveAccount(i, dir) {
   if (j < 0 || j >= data.accounts.length) return;
   flushAcctEditorInputs();               // 先保存本列與其他列未存的編輯
   [data.accounts[i], data.accounts[j]] = [data.accounts[j], data.accounts[i]];
+  renderAcctEditor();
+}
+// 帳戶編輯器：按住 ⠿ 直接拖曳排序（Pointer Events，觸控＋滑鼠通用；沿用明細清單 enableRowReorder 的模式）
+function enableAcctReorder(listEl) {
+  let dragEl = null, moved = false;
+  listEl.querySelectorAll('.drag-handle').forEach(handle => {
+    handle.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      dragEl = handle.closest('.acct-edit');
+      moved = false;
+      if (dragEl) { dragEl.classList.add('dragging'); try { handle.setPointerCapture(e.pointerId); } catch (_) {} }
+    });
+  });
+  listEl.addEventListener('pointermove', e => {
+    if (!dragEl) return;
+    e.preventDefault();
+    const y = e.clientY;
+    for (const r of listEl.querySelectorAll('.acct-edit')) {
+      if (r === dragEl) continue;
+      const rect = r.getBoundingClientRect();
+      if (y >= rect.top && y <= rect.bottom) {
+        const mid = rect.top + rect.height / 2;
+        if (y < mid) { if (dragEl.nextSibling !== r) { listEl.insertBefore(dragEl, r); moved = true; } }
+        else { if (r.nextSibling !== dragEl) { listEl.insertBefore(dragEl, r.nextSibling); moved = true; } }
+        break;
+      }
+    }
+  });
+  const end = () => {
+    if (!dragEl) return;
+    dragEl.classList.remove('dragging');
+    dragEl = null;
+    if (moved) commitAcctOrder([...listEl.querySelectorAll('.acct-edit[data-id]')].map(r => r.dataset.id));
+  };
+  listEl.addEventListener('pointerup', end);
+  listEl.addEventListener('pointercancel', end);
+}
+// 拖曳放開後：先保存所有未存編輯（此刻 data-i 仍對應拖曳前的 data.accounts 索引，且輸入值已隨列一起移動），
+// 再依 DOM 的 id 順序重排 data.accounts，最後重繪（重繪會把 data-i 重新編號）。順序於「儲存」時一併落盤。
+function commitAcctOrder(ids) {
+  flushAcctEditorInputs();
+  const byId = new Map(data.accounts.map(a => [a.id, a]));
+  const next = [];
+  for (const id of ids) { const a = byId.get(id); if (a) { next.push(a); byId.delete(id); } }
+  for (const a of data.accounts) if (byId.has(a.id)) next.push(a);   // 保險：任何未列到 ids 的帳戶補回，絕不遺失
+  data.accounts = next;
   renderAcctEditor();
 }
 function addAccountRow() {

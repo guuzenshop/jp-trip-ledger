@@ -14,6 +14,7 @@ const eq = (a, b, n) => ok(a === b, `${n} [got=${JSON.stringify(a)} want=${JSON.
 const PLAN = {
   S1: 3, S2: 2, S3: 2, S4: 2, S5: 5, S6: 2,          // 選取/全選/批量刪除 小計 16
   C1: 7, C2: 3, C3: 8,                                // 只清除明細 / 開新帳本 小計 18
+  R1: 3, R2: 2, R3: 2, R4: 2, R5: 3, R6: 2,          // 帳戶拖曳排序 小計 14
 };
 const RAN = {};
 function scenario(name, fn) {
@@ -188,6 +189,74 @@ scenario('C3', () => {
   ok(w.eval('data.accounts.every(a=>a.initial===0)'), 'C3 新帳本帳戶餘額歸零');
   eq(w.eval('JSON.stringify(Object.keys(data.categories).sort())'), srcCatKeys, 'C3 新帳本沿用分類');
   eq(w.eval("store.ledgers.find(l=>l.id==='" + id1 + "').txns.length"), 5, 'C3 舊帳本明細原封保留');
+  w.close();
+});
+
+/* ── R 系列：帳戶管理拖曳排序（jsdom 無法模擬真實 pointer 手勢，改測 commit 核心 + DOM 結構）── */
+
+/* R1: renderAcctEditor 每列有 data-id 與拖曳把手 ⠿ */
+scenario('R1', () => {
+  const { w } = boot();
+  w.eval('renderAcctEditor();');
+  eq(w.eval("document.querySelectorAll('#acct-editor .acct-edit').length"), 3, 'R1 三列帳戶');
+  ok(w.eval("[...document.querySelectorAll('#acct-editor .acct-edit')].every(r=>r.dataset.id)"), 'R1 每列有 data-id');
+  ok(w.eval("[...document.querySelectorAll('#acct-editor .acct-edit')].every(r=>r.querySelector('.drag-handle'))"), 'R1 每列有拖曳把手 ⠿');
+  w.close();
+});
+
+/* R2: commitAcctOrder 依 DOM id 順序重排 data.accounts */
+scenario('R2', () => {
+  const { w } = boot();
+  const rev = JSON.parse(w.eval('JSON.stringify(data.accounts.map(a=>a.id))')).reverse();
+  w.eval('commitAcctOrder(' + JSON.stringify(rev) + ');');
+  eq(w.eval('JSON.stringify(data.accounts.map(a=>a.id))'), JSON.stringify(rev), 'R2 依 id 順序重排');
+  eq(w.eval('data.accounts.length'), 3, 'R2 帳戶數不變');
+  w.close();
+});
+
+/* R3: 拖曳前「未存的編輯」先被 flush 保存到正確帳戶，再套用新順序 */
+scenario('R3', () => {
+  const { w } = boot();
+  w.eval('renderAcctEditor();');
+  const id0 = w.eval('data.accounts[0].id');
+  w.eval("document.querySelector('#acct-editor input[data-k=\"name\"]').value = '改名測試';");
+  const rev = JSON.parse(w.eval('JSON.stringify(data.accounts.map(a=>a.id))')).reverse();
+  w.eval('commitAcctOrder(' + JSON.stringify(rev) + ');');
+  eq(w.eval("data.accounts.find(a=>a.id==='" + id0 + "').name"), '改名測試', 'R3 未存改名保存到正確帳戶');
+  eq(w.eval('data.accounts[data.accounts.length-1].id'), id0, 'R3 該帳戶移到最後一列');
+  w.close();
+});
+
+/* R4: ▲▼ moveAccount 仍可用（零回歸） */
+scenario('R4', () => {
+  const { w } = boot();
+  w.eval('renderAcctEditor();');
+  const ids = JSON.parse(w.eval('JSON.stringify(data.accounts.map(a=>a.id))'));
+  w.eval('moveAccount(0,1);');
+  eq(w.eval('data.accounts[0].id'), ids[1], 'R4 下移：0↔1 對調（前）');
+  eq(w.eval('data.accounts[1].id'), ids[0], 'R4 下移：0↔1 對調（後）');
+  w.close();
+});
+
+/* R5: commitAcctOrder 對缺漏 id 穩健（絕不遺失帳戶、不重複） */
+scenario('R5', () => {
+  const { w } = boot();
+  const ids = JSON.parse(w.eval('JSON.stringify(data.accounts.map(a=>a.id))'));
+  w.eval("commitAcctOrder(['" + ids[2] + "']);");
+  eq(w.eval('data.accounts.length'), 3, 'R5 缺 id 仍不遺失帳戶');
+  eq(w.eval('(new Set(data.accounts.map(a=>a.id))).size'), 3, 'R5 無重複');
+  eq(w.eval('data.accounts[0].id'), ids[2], 'R5 給定 id 排最前、其餘保原序補回');
+  w.close();
+});
+
+/* R6: 重排後 save → 舊格式鏡射（jp_trip_ledger_v2）保留新順序（持久化） */
+scenario('R6', () => {
+  const { w } = boot();
+  const rev = JSON.parse(w.eval('JSON.stringify(data.accounts.map(a=>a.id))')).reverse();
+  w.eval('commitAcctOrder(' + JSON.stringify(rev) + '); save();');
+  const mirror = JSON.parse(w.eval("localStorage.getItem('jp_trip_ledger_v2')"));
+  eq(JSON.stringify(mirror.accounts.map(a => a.id)), JSON.stringify(rev), 'R6 儲存後鏡射保留新順序');
+  eq(mirror.accounts.length, 3, 'R6 鏡射帳戶數正確');
   w.close();
 });
 
