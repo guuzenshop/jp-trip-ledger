@@ -14,7 +14,7 @@ const eq = (a, b, n) => ok(a === b, `${n} [got=${JSON.stringify(a)} want=${JSON.
 const PLAN = {
   S1: 3, S2: 2, S3: 2, S4: 2, S5: 5, S6: 2,          // 選取/全選/批量刪除 小計 16
   C1: 7, C2: 3, C3: 8,                                // 只清除明細 / 開新帳本 小計 18
-  R1: 3, R2: 2, R3: 2, R4: 2, R5: 3, R6: 2, R7: 2,   // 帳戶拖曳排序 小計 16
+  R1: 3, R2: 2, R3: 2, R4: 2, R5: 3, R6: 2, R7: 2, R8: 3,   // 帳戶拖曳排序 小計 19
 };
 const RAN = {};
 function scenario(name, fn) {
@@ -268,6 +268,19 @@ scenario('R7', () => {
   const rev = JSON.parse(w.eval('JSON.stringify(data.accounts.map(a=>a.id))')).reverse();
   w.eval('commitAcctOrder(' + JSON.stringify(rev) + ');');
   eq(w.eval('JSON.stringify(data.accounts.map(a=>a.id))'), JSON.stringify(rev), 'R7 多次重繪後 commit 仍正常');
+  w.close();
+});
+
+/* R8: commitAcctOrder 對「重複 id」穩健（去重：集合不變、不重複、首個 dup 生效後續略過）
+       —— 補 Claude Code 2026-07-24 審查點名的覆蓋缺口（程式碼本已正確，此處加專測釘死） */
+scenario('R8', () => {
+  const { w } = boot();
+  const ids = JSON.parse(w.eval('JSON.stringify(data.accounts.map(a=>a.id))')); // [jpy, icoca, twd]
+  // 含重複 + 重排：[twd, twd, jpy, icoca] → 去重後 [twd, jpy, icoca]
+  w.eval("commitAcctOrder(['" + ids[2] + "','" + ids[2] + "','" + ids[0] + "','" + ids[1] + "']);");
+  eq(w.eval('data.accounts.length'), 3, 'R8 重複 id 不增生帳戶');
+  eq(w.eval('(new Set(data.accounts.map(a=>a.id))).size'), 3, 'R8 無重複帳戶');
+  eq(w.eval('JSON.stringify(data.accounts.map(a=>a.id))'), JSON.stringify([ids[2], ids[0], ids[1]]), 'R8 去重後順序正確（首個 dup 生效、後續略過）');
   w.close();
 });
 
